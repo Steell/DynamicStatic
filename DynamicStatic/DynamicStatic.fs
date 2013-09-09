@@ -124,8 +124,6 @@ let env_lookup (env : TypeEnv list) (id : string) =
 
 let generalize_rule cset id t =
     let rec generalize_type cset = function
-        | Any | Atom | Nil | True | False | Unit as t -> t, cset
-
         | PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
 
         | TypeId(id') ->
@@ -155,6 +153,8 @@ let generalize_rule cset id t =
             let os', cset' = List.fold overload_folder ([], cset) os
             Func(os'), cset'
 
+        | t -> t, cset
+
     let t', cset' = generalize_type cset t
     Set.add (id, t') cset'
     
@@ -176,7 +176,6 @@ let rec unify (sub : Type) (super : Type) (cset: Set<Constraint>) : UnificationR
             | Failure(_, _) -> unifies_with_any cset' sub ts
         | [] -> None
     match sub, super with
-    //immediate success
     | _, Any | Nil, List(_) | Func(_), Atom -> Success(cset)
 
     | PolyType(id), _ | _, PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
@@ -286,14 +285,11 @@ let build_cft (expr : TypeExpression) : ControlTypeExpression =
     let cte, cft, stack = build_cft expr empty_cft []
     cft_add_stack cft stack, cte
 
-
 let rec constrain (cft : ControlFlowTree) (cset : Set<Constraint>) (sub_type : Type) (super_type : Type) : UnificationResult =
-    
     let unify' map cset' =
         let cft_subtype = cft_map_lookup map sub_type
         let cft_supertype = cft_map_lookup map super_type
         unify cft_subtype cft_supertype cset'
-
     match cft with
     | CFT(map, []) -> unify' map cset
     | CFT(_, trees) -> 
@@ -374,18 +370,35 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
             | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
         | Failure(t, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
 
-let rec merge_duplicate_rules (cset : Set<Constraint>) : Set<Constraint> =
-    failwith "Not Implemented"
+let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
+    let merge_types cset' t1 t2 =
+        let cset' = Set.ofList cset'
+        match unify t1 t2 cset' with
+        | Success(cset'') -> Some(t1, Set.toList cset'')
+        | Failure(_, _) ->
+            match unify t2 t1 cset' with
+            | Success(cset'') -> Some(t2, Set.toList cset'')
+            | Failure(_, _) -> None
+    let rec merge_all map = function
+        | (id, t)::cset' ->
+            match Map.tryFind id map with
+            | Some(t') ->
+                match merge_types cset' t t' with
+                | Some(t'', cset'') -> merge_all (Map.add id t'' map) cset''
+                | None -> failwith "Could not merge types."
+            | None -> merge_all (Map.add id t map) cset'
+        | [] -> map
+    merge_all Map.empty <| Set.toList cset
 
-let rec fold_type_constants (cset : Set<Constraint>) : Set<Constraint> =
-    let rec is_recursive (id, type_constraint) =
+let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
+    let rec is_recursive id type_constraint =
         match type_constraint with
         | TypeId(id') when id = id -> true
-        | List(t) -> is_recursive (id, t)
-        | Func(os) -> List.exists (fun (pt, ot) -> List.exists (fun t -> is_recursive (id, t)) pt || is_recursive (id, ot)) os
-        | Union(ts) -> Set.exists (fun t -> is_recursive (id, t)) ts
+        | List(t) -> is_recursive id t
+        | Func(os) -> List.exists (fun (pt, ot) -> List.exists (is_recursive id) pt || is_recursive id ot) os
+        | Union(ts) -> Set.exists (is_recursive id) ts
         | _ -> false
-    let lookup = Map.ofSeq <| Seq.filter (is_recursive >> not) cset
+    let lookup = Map.filter (fun id t -> not <| is_recursive id t) cset
     let rec fold_constraint id type_constraint = 
         match type_constraint with
         | TypeId(id') when id' <> id -> Map.tryFind id' lookup
@@ -427,14 +440,14 @@ let rec fold_type_constants (cset : Set<Constraint>) : Set<Constraint> =
     let rec fold_all again cset' = function
         | (id, t)::cs ->
             match fold_constraint id t with
-            | Some(t') -> fold_all true (Set.add (id, t') cset') cs
-            | None -> fold_all again (Set.add (id, t) cset') cs
+            | Some(t') -> fold_all true (Map.add id  t' cset') cs
+            | None -> fold_all again (Map.add id t cset') cs
         | [] -> 
             if again then
                 fold_type_constants cset
             else
                 cset
-    fold_all false Set.empty <| Set.toList cset
+    fold_all false Map.empty <| Map.toList cset
 
 let rec collapse_cft (cft : ControlFlowTree) (cset : Set<Constraint>) : Map<string, Type> =
     failwith "Not Implemented"
