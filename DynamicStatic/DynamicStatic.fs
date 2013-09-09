@@ -24,15 +24,19 @@ type Type =
 
 type Constraint = string * Type
 
-type ControlFlowTree = CFT of Map<string, string> * ControlFlowTree list
+type ControlFlowTree = 
+    | Leaf of Map<string, string> 
+    | Branch of ControlFlowTree list
 
-let rec cft_add (id : string) (CFT(map, trees)) =
-    CFT(Map.add id (fresh_var()) map, List.map (cft_add id) trees)
+let rec cft_add (id : string) = function
+    | Leaf(map) -> Leaf(Map.add id (fresh_var()) map)
+    | Branch(trees) -> Branch(List.map (cft_add id) trees)
 
-let cft_add_CFT (to_add : ControlFlowTree) (CFT(map, trees)) =
-    CFT(map, to_add::trees)
+let cft_add_branch (to_add : ControlFlowTree) = function
+    | Leaf(_) -> Branch([to_add])
+    | Branch(trees) -> Branch(to_add::trees)
 
-let empty_cft = CFT(Map.empty, [])
+let empty_cft = Leaf(Map.empty)
 
 let cft_map_lookup map =
     let rec lookup = function
@@ -280,7 +284,7 @@ let build_cft (expr : TypeExpression) : ControlTypeExpression =
             let f_cft' = cft_add_stack f_cft f_stack
 
             let return_id = fresh_var()
-            CIf(c_test, (t_cft', c_t_expr), (f_cft', c_f_expr), return_id), cft_add_CFT f_cft' <| cft_add_CFT t_cft' cft', return_id::stack'
+            CIf(c_test, (t_cft', c_t_expr), (f_cft', c_f_expr), return_id), cft_add_branch f_cft' <| cft_add_branch t_cft' cft', return_id::stack'
 
     let cte, cft, stack = build_cft expr empty_cft []
     cft_add_stack cft stack, cte
@@ -291,8 +295,8 @@ let rec constrain (cft : ControlFlowTree) (cset : Set<Constraint>) (sub_type : T
         let cft_supertype = cft_map_lookup map super_type
         unify cft_subtype cft_supertype cset'
     match cft with
-    | CFT(map, []) -> unify' map cset
-    | CFT(_, trees) -> 
+    | Leaf(map) -> unify' map cset
+    | Branch(trees) -> 
         let rec unify_in_all cset' = function
             | tree::trees' -> 
                 match constrain tree cset' sub_type super_type with
@@ -303,10 +307,10 @@ let rec constrain (cft : ControlFlowTree) (cset : Set<Constraint>) (sub_type : T
 
 let overload_function cft ((param_names : string list), (body_type : Type)) : Type =
     let rec define_in_leaves os = function
-        | CFT(map, []) -> 
+        | Leaf(map) -> 
             let lookup = cft_map_lookup map
             (List.map (PolyType >> lookup) param_names, lookup body_type)::os
-        | CFT(_, trees) ->
+        | Branch(trees) ->
             List.fold define_in_leaves os trees
     Func(define_in_leaves [] cft)
 
@@ -450,7 +454,9 @@ let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
     fold_all false Map.empty <| Map.toList cset
 
 let rec collapse_cft (cft : ControlFlowTree) (cset : Set<Constraint>) : Map<string, Type> =
-    failwith "Not Implemented"
+    match cft with
+    | Leaf(map) -> Map.empty
+    | Branch(trees) -> Map.empty
 
 (*  ;; filter :: A B -> Z
     (define (filter l p)
