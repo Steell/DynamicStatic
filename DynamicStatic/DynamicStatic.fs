@@ -21,6 +21,23 @@ type Type =
     | List of Type
     | Func of (Type list * Type) list
     | Union of Set<Type>
+       
+let rec type2str = function
+    | Any -> "Any"
+    | Atom -> "Atom"
+    | Nil -> "Nil"
+    | Unit -> "IO"
+    | True -> "True"
+    | False -> "False"
+    | TypeId(id) -> sprintf "'%s" id
+    | PolyType(id) -> sprintf "Poly(%s)" id
+    | List(t) -> sprintf "List<%s>" <| type2str t
+    | Func([o]) -> overload2str o
+    | Func(os) -> sprintf "(%s)" <| String.concat "+" (Seq.map overload2str os)
+    | Union(ts) -> String.concat "|" <| Seq.map type2str ts
+
+and overload2str (ps, r) = 
+    sprintf "(%s -> %s)" (String.concat " " <| List.map type2str ps) (type2str r)
 
 type Constraint = string * Type
 
@@ -40,15 +57,42 @@ let empty_cft = Leaf(Map.empty)
 
 let cft_map_lookup map =
     let rec lookup = function
-        | PolyType(id) -> TypeId(Map.find id map)
-        | List(t) -> List(lookup t)
+        | PolyType(id) -> 
+            match Map.tryFind id map with
+            | Some(id') -> Some(TypeId(id'))
+            | None -> None
+        | List(t) -> 
+            match lookup t with
+            | Some(t') -> Some(List(t'))
+            | None -> None
         | Func(os) ->
-            let overload_lookup (parameters, return_type) =
-                List.map lookup parameters, lookup return_type
-            Func(List.map overload_lookup os)
+            let overload_lookup (parameters, return_type) = function
+                | Some(os) -> 
+                    match lookup_all parameters with
+                    | Some(ps) ->
+                        match lookup return_type with
+                        | Some(r) -> Some((ps, r)::os)
+                        | None -> None
+                    | None -> None
+                | None -> None               
+            match List.foldBack overload_lookup os <| Some([]) with
+            | Some(os) -> Some(Func(os))
+            | None -> None
         | Union(ts) ->
-            Union(Set.map lookup ts)
-        | x -> x
+            match lookup_all <| Set.toList ts with
+            | Some(ts') -> Some(Union(Set.ofList ts'))
+            | None -> None
+        | x -> Some(x)
+    and lookup_all ts =
+        List.foldBack 
+            (fun t -> function 
+                | Some(ts) -> 
+                    match lookup t with
+                    | Some(t') -> Some(t'::ts)
+                    | None -> None
+                | None -> None)
+            ts
+            (Some([]))
     lookup
 
 type ControlTypeExpression = (ControlFlowTree * CTE)
@@ -291,9 +335,13 @@ let build_cft (expr : TypeExpression) : ControlTypeExpression =
 
 let rec constrain (cft : ControlFlowTree) (cset : Set<Constraint>) (sub_type : Type) (super_type : Type) : UnificationResult =
     let unify' map cset' =
-        let cft_subtype = cft_map_lookup map sub_type
-        let cft_supertype = cft_map_lookup map super_type
-        unify cft_subtype cft_supertype cset'
+        match cft_map_lookup map sub_type with
+        | Some(cft_subtype) ->
+            match cft_map_lookup map super_type with
+            | Some(cft_supertype) ->
+                unify cft_subtype cft_supertype cset'
+            | None -> Failure(sub_type, super_type)
+        | None -> Failure(sub_type, super_type)
     match cft with
     | Leaf(map) -> unify' map cset
     | Branch(trees) -> 
@@ -308,7 +356,10 @@ let rec constrain (cft : ControlFlowTree) (cset : Set<Constraint>) (sub_type : T
 let overload_function cft ((param_names : string list), (body_type : Type)) : Type =
     let rec define_in_leaves os = function
         | Leaf(map) -> 
-            let lookup = cft_map_lookup map
+            let lookup t = 
+                match cft_map_lookup map t with
+                | Some(x) -> x
+                | None -> failwith "Overload Failure"
             (List.map (PolyType >> lookup) param_names, lookup body_type)::os
         | Branch(trees) ->
             List.fold define_in_leaves os trees
@@ -453,10 +504,48 @@ let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
                 cset
     fold_all false Map.empty <| Map.toList cset
 
-let rec collapse_cft (cft : ControlFlowTree) (cset : Set<Constraint>) : Map<string, Type> =
-    match cft with
-    | Leaf(map) -> Map.empty
-    | Branch(trees) -> Map.empty
+let rec collapse_types t1 t2 =
+    match (t1, t2) with
+    | Any, x | x, Any
+    | Atom, (Func(_) as x) | (Func(_) as x), Atom
+    | Nil, (List(_) as x) | (List(_) as x), Nil    -> x
+    | PolyType(id), _ | _, PolyType(id) -> failwith "Impossible"
+    | List(t1'), List(t2') -> List(collapse_types t1 t2)
+    | Func(os1), Func(os2) -> Func(os1 @ os2)
+    | Union(ts), x | x, Union(ts) -> Union(Set.add x ts)
+    | _, _ -> Union(Set.ofList [t1; t2])
+
+let collapse_cft (cft : ControlFlowTree) (cset : Map<string, Type>) : Map<string, Type> =
+    let rec collapse_map map = function
+        | (poly_id, id)::cs -> 
+            let t =
+                match Map.tryFind id cset with
+                | Some(t) -> t
+                | None -> TypeId(id)
+            let t' =
+                match Map.tryFind poly_id map with
+                | Some(t') -> collapse_types t t'
+                | None -> t
+            collapse_map (Map.add poly_id t' map) cs
+        | [] -> map
+        
+    let rec collapse map = function
+        | Leaf(map') -> collapse_map map <| Map.toList map'
+        | Branch(trees) -> List.fold collapse map trees
+    collapse Map.empty cft
+
+let type_check expr =
+    let (cft, cte) = build_cft expr
+    let t, cset = build_cset (cte, cft) Set.empty
+    let map = merge_duplicate_rules cset |> fold_type_constants
+    let lookup = collapse_cft cft map
+    let rec update_type = function
+        | PolyType(id) -> Map.find id lookup
+        | List(t) -> List(update_type t)
+        | Func(os) -> Func(List.map (fun (ps, r) -> List.map update_type ps, update_type r) os)
+        | Union(ts) -> Union(Set.map update_type ts)
+        | x -> x
+    update_type t
 
 (*  ;; filter :: A B -> Z
     (define (filter l p)
@@ -478,6 +567,10 @@ let filter = Let(["filter"], [Fun(["l"; "p"],
                                             Call([Type_E(Func([[PolyType("C"); List(PolyType("C"))], List(PolyType("C"))])); Type_E(PolyType("x")); Call([Type_E(PolyType("filter")); Call([Type_E(Func([[List(PolyType("K"))], List(PolyType("K"))])); Type_E(PolyType("l"))]); Type_E(PolyType("p"))])]),
                                             Call([Type_E(PolyType("filter")); Call([Type_E(Func([[List(PolyType("L"))], List(PolyType("L"))])); Type_E(PolyType("l"))]); Type_E(PolyType("p"))])))))],
                  Type_E(PolyType("filter")))
+
+let Test() =
+    let test = type_check >> type2str >> printfn "%s"
+    test filter
 
 (*  ;; flatten :: A -> Z
     (define (flatten l)
