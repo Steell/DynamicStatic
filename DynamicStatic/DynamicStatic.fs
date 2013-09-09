@@ -461,6 +461,8 @@ let rec collapse_cft (cft : ControlFlowTree) (cset : Set<Constraint>) : Map<stri
             (if (p x)
                 <3> (cons x (filter (rest l) p))
                 <4> (filter (rest l) p)))))
+
+    ;; filter :: List<A|B> ((A -> True)+(B -> False)) -> List<A>
 *)
 let filter = Let(["filter"], [Fun(["l"; "p"], 
                                   If(Call([Type_E(Func([[Nil], True; [List(PolyType("A"))], False])); Type_E(PolyType("l"))]), 
@@ -470,3 +472,32 @@ let filter = Let(["filter"], [Fun(["l"; "p"],
                                             Call([Type_E(Func([[PolyType("C"); List(PolyType("C"))], List(PolyType("C"))])); Type_E(PolyType("x")); Call([Type_E(PolyType("filter")); Call([Type_E(Func([[List(PolyType("K"))], List(PolyType("K"))])); Type_E(PolyType("l"))]); Type_E(PolyType("p"))])]),
                                             Call([Type_E(PolyType("filter")); Call([Type_E(Func([[List(PolyType("L"))], List(PolyType("L"))])); Type_E(PolyType("l"))]); Type_E(PolyType("p"))])))))],
                  Type_E(PolyType("filter")))
+
+(*  ;; flatten :: A -> Z
+    (define (flatten l)
+        (if (not (list? l))
+            (list l)
+            (if (empty? l)
+                empty
+                (append (flatten (first l))
+                        (flatten (rest l))))))
+
+    ;; flatten :: A -> List<Atom>
+    ;;   where A = Atom|List<A>
+*)
+
+(*  ;; omega :: A -> Z
+    (define (omega x) (x x))
+
+    ;; omega :: (A -> B) -> B
+    ;;   where A = A -> B
+*)
+
+(*  ;; Y :: A -> Z
+    (define (Y f)
+        ((lambda (x) (x x))
+         (lambda (x) (f (lambda (v) ((x x) v))))))
+
+    ;; Y :: ((A -> B) C -> D) -> (C -> D)
+    ;;   where A = A -> B
+*)
