@@ -41,10 +41,22 @@ and overload2str (ps, r) =
 
 type Constraint = string * Type
 
-let cset_add (id, rule) cset =
+let constraint_is_reflexive (id, rule) =
     match rule with
-    | TypeId(id') when id = id' -> cset
-    | _ -> Set.add (id, rule) cset
+    | TypeId(id') when id = id' -> true
+    | _ -> false
+
+let cset_add constrnt cset =
+    if constraint_is_reflexive constrnt then
+        cset
+    else
+        Set.add constrnt cset
+
+let cmap_add id rule cmap =
+    if constraint_is_reflexive (id, rule) then
+        cmap
+    else
+        Map.add id rule cmap
 
 type ControlFlowTree = 
     | Leaf of Map<string, string> 
@@ -458,9 +470,9 @@ let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
             match Map.tryFind id map with
             | Some(t') ->
                 match merge_types cset' t t' with
-                | Some(t'', cset'') -> merge_all (Map.add id t'' map) cset''
+                | Some(t'', cset'') -> merge_all (cmap_add id t'' map) cset''
                 | None -> failwith "Could not merge types."
-            | None -> merge_all (Map.add id t map) cset'
+            | None -> merge_all (cmap_add id t map) cset'
         | [] -> map
     merge_all Map.empty <| Set.toList cset
 
@@ -515,7 +527,7 @@ let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
         | (id, t)::cs ->
             match fold_constraint id t with
             | Some(t') -> fold_all true cset' <| (id, t')::cs
-            | None -> fold_all again (Map.add id t cset') cs
+            | None -> fold_all again (cmap_add id t cset') cs
         | [] -> 
             if again then
                 fold_type_constants cset'
