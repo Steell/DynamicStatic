@@ -41,6 +41,11 @@ and overload2str (ps, r) =
 
 type Constraint = string * Type
 
+let cset_add (id, rule) cset =
+    match rule with
+    | TypeId(id') when id = id' -> cset
+    | _ -> Set.add (id, rule) cset
+
 type ControlFlowTree = 
     | Leaf of Map<string, string> 
     | Branch of ControlFlowTree list
@@ -181,7 +186,7 @@ let generalize_rule cset id t =
         | TypeId(id') ->
             let id'' = fresh_var()
             let t' = TypeId(id'')
-            t', Set.add (id', t') cset
+            t', cset_add (id', t') cset
 
         | List(t) ->
             let t', cset' = generalize_type cset t
@@ -208,7 +213,7 @@ let generalize_rule cset id t =
         | t -> t, cset
 
     let t', cset' = generalize_type cset t
-    Set.add (id, t') cset'
+    cset_add (id, t') cset'
     
 type UnificationResult =
     | Success of Set<Constraint>
@@ -232,7 +237,7 @@ let rec unify (sub : Type) (super : Type) (cset: Set<Constraint>) : UnificationR
 
     | PolyType(id), _ | _, PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
 
-    | TypeId(id), _          -> Success(Set.add (id, super) cset)
+    | TypeId(id), _          -> Success(cset_add (id, super) cset)
     | _,          TypeId(id) -> Success(generalize_rule cset id sub)
 
     | List(sub'), List(super') -> unify sub' super' cset
