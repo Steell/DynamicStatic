@@ -260,9 +260,14 @@ let rec unify (sub : Type) (super : Type) (cset: Set<Constraint>) : UnificationR
                     | sub_arg::sub_args'', super_arg::super_args'' ->
                         match unify super_arg sub_arg cset'' with
                         | Success(cset''') -> arg_folder cset''' sub_args'' super_args''
-                        | failure -> None
+                        | _ -> None
                     | _ -> Some(cset'')
-                arg_folder cset' sub_args super_args
+                match arg_folder cset' sub_args super_args with
+                | Some(cset'') ->
+                    match unify sub_return super_return cset'' with
+                    | Success(cset''') -> Some(cset''')
+                    | _ -> None
+                | None -> None
         let rec any_unify cset' super' = function
             | sub'::os ->
                 match unify_overload sub' super' cset' with
@@ -581,6 +586,8 @@ let id = Let(["id"], [Fun(["x"], Type_E(PolyType("x")))], Type_E(PolyType("id"))
 
 let trueFalse = If(Type_E(True), Type_E(True), Type_E(False))
 
+let overloadCall = Call([Type_E(Func([[True], False; [False], True])); Type_E(True)])
+
 let omega = Let(["omega"], [Fun(["x"], Call([Type_E(PolyType("x")); Type_E(PolyType("x"))]))], Type_E(PolyType("omega")))
 
 let fact = Let(["fact"], [Fun(["n"], 
@@ -591,10 +598,11 @@ let fact = Let(["fact"], [Fun(["n"],
 
 let Test() =
     let test = type_check >> type2str >> printfn "%s"
-    test id;
-    test trueFalse;
-    test omega;
-    test fact;
+    //test id;
+    //test trueFalse;
+    //test omega;
+    //test fact;
+    //test overloadCall;
     test filter;
 
 (*  ;; flatten :: A -> Z
