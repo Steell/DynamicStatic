@@ -50,8 +50,12 @@ let rec cft_add (id : string) = function
     | Branch(trees) -> Branch(List.map (cft_add id) trees)
 
 let cft_add_branch (to_add : ControlFlowTree) = function
-    | Leaf(_) -> Branch([to_add])
-    | Branch(trees) -> Branch(to_add::trees)
+    | Leaf(_) -> 0, Branch([to_add])
+    | Branch(trees) -> trees.Length, Branch(trees@[to_add])
+
+let cft_branch idx = function
+    | Leaf(_) -> failwith "Can't get a branch from a leaf."
+    | Branch(trees) -> trees.Item idx
 
 let empty_cft = Leaf(Map.empty)
 
@@ -95,7 +99,7 @@ let cft_map_lookup map =
             (Some([]))
     lookup
 
-type ControlTypeExpression = (ControlFlowTree * CTE)
+type ControlTypeExpression = (int * CTE)
 and CTE =
     | CAtom_E
     | CType_E of Type
@@ -276,14 +280,14 @@ let rec unify (sub : Type) (super : Type) (cset: Set<Constraint>) : UnificationR
     | sub', super' when sub' = super' -> Success(cset)
     | _,    _                         -> Failure(sub, super)
 
-let build_cft (expr : TypeExpression) : ControlTypeExpression =
+let build_cft (expr : TypeExpression) : ControlFlowTree * CTE =
     let cft_add_stack cft stack = List.foldBack cft_add stack cft
     let rec build_cft (expr : TypeExpression) (cft : ControlFlowTree) (stack : string list) : (CTE * ControlFlowTree * string list) =
         let rec build_exprs cft' stack' a = function
             | expr::exprs ->
                 let cte, cft'', stack'' = build_cft expr cft' stack'
                 build_exprs cft'' stack'' (cte::a) exprs
-            | [] ->  a, cft', stack'
+            | [] ->  List.rev a, cft', stack'
         match expr with
         | Atom_E -> CAtom_E, cft, stack
         
@@ -327,8 +331,11 @@ let build_cft (expr : TypeExpression) : ControlTypeExpression =
             let c_f_expr, f_cft, f_stack = build_cft f_expr cft' []
             let f_cft' = cft_add_stack f_cft f_stack
 
+            let t_idx, cft'' = cft_add_branch t_cft' cft'
+            let f_idx, cft''' = cft_add_branch f_cft' cft''
+
             let return_id = fresh_var()
-            CIf(c_test, (t_cft', c_t_expr), (f_cft', c_f_expr), return_id), cft_add_branch f_cft' <| cft_add_branch t_cft' cft', return_id::stack'
+            CIf(c_test, (t_idx, c_t_expr), (f_idx, c_f_expr), return_id),  cft''', return_id::stack'
 
     let cte, cft, stack = build_cft expr empty_cft []
     cft_add_stack cft stack, cte
@@ -402,8 +409,10 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
                 let _, cset'' = build_cset (expr', cft) cset'
                 begin_exprs cset'' exprs
         begin_exprs cset exprs
-    | CIf(test, (t_cft, t_expr), (f_cft, f_expr), return_id) ->
+    | CIf(test, (t_idx, t_expr), (f_idx, f_expr), return_id) ->
         let test_type, cset' = build_cset (test, cft) cset
+        let t_cft = cft_branch t_idx cft
+        let f_cft = cft_branch f_idx cft
         let cset'' = 
             match constrain t_cft cset' test_type True with
             | Success(cset'') -> cset''
@@ -415,13 +424,13 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
         let cset'''' = 
             match constrain cft cset''' test_type <| Union(Set.ofList [True; False]) with
             | Success(cset'''') -> cset''''
-            | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) Test CFT could not be contrained to True|False"
-        let true_type, cset''''' = build_cset (t_expr, t_cft) cset''''
+            | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) Test CFT could not be constrained to True|False"
+        let true_type, cset''''' = build_cset (t_expr, t_cft) cset''(*''*)
         match constrain t_cft cset''''' true_type <| PolyType(return_id) with
         | Success(cset'''''') ->
-            let false_type, cset'''''' = build_cset (f_expr, f_cft) cset'''''
-            match constrain f_cft cset'''''' false_type <| PolyType(return_id) with
-            | Success(cset''''''') -> PolyType(return_id), cset'''''''
+            let false_type, cset''''''' = build_cset (f_expr, f_cft) cset''''''
+            match constrain f_cft cset''''''' false_type <| PolyType(return_id) with
+            | Success(cset'''''''') -> PolyType(return_id), cset''''''''
             | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
         | Failure(t, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
 
@@ -495,13 +504,13 @@ let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
     let rec fold_all again cset' = function
         | (id, t)::cs ->
             match fold_constraint id t with
-            | Some(t') -> fold_all true (Map.add id  t' cset') cs
+            | Some(t') -> fold_all true cset' <| (id, t')::cs
             | None -> fold_all again (Map.add id t cset') cs
         | [] -> 
             if again then
-                fold_type_constants cset
+                fold_type_constants cset'
             else
-                cset
+                cset'
     fold_all false Map.empty <| Map.toList cset
 
 let rec collapse_types t1 t2 =
@@ -568,9 +577,25 @@ let filter = Let(["filter"], [Fun(["l"; "p"],
                                             Call([Type_E(PolyType("filter")); Call([Type_E(Func([[List(PolyType("L"))], List(PolyType("L"))])); Type_E(PolyType("l"))]); Type_E(PolyType("p"))])))))],
                  Type_E(PolyType("filter")))
 
+let id = Let(["id"], [Fun(["x"], Type_E(PolyType("x")))], Type_E(PolyType("id")))
+
+let trueFalse = If(Type_E(True), Type_E(True), Type_E(False))
+
+let omega = Let(["omega"], [Fun(["x"], Call([Type_E(PolyType("x")); Type_E(PolyType("x"))]))], Type_E(PolyType("omega")))
+
+let fact = Let(["fact"], [Fun(["n"], 
+                              If(Call([Type_E(Func([[Atom; Atom], Union(Set.ofList [True; False])])); Type_E(PolyType("n")); Type_E(Atom)]), 
+                                 Type_E(Atom), 
+                                 Call([Type_E(PolyType("fact")); Call([Type_E(Func([[Atom; Atom], Atom])); Type_E(PolyType("n")); Type_E(Atom)])])))], 
+               Type_E(PolyType("fact")))
+
 let Test() =
     let test = type_check >> type2str >> printfn "%s"
-    test filter
+    test id;
+    test trueFalse;
+    test omega;
+    test fact;
+    test filter;
 
 (*  ;; flatten :: A -> Z
     (define (flatten l)
