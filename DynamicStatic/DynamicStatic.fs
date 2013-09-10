@@ -529,7 +529,7 @@ let rec collapse_types t1 t2 =
     | Atom, (Func(_) as x) | (Func(_) as x), Atom
     | Nil, (List(_) as x) | (List(_) as x), Nil    -> x
     | PolyType(id), _ | _, PolyType(id) -> failwith "Impossible"
-    | List(t1'), List(t2') -> List(collapse_types t1 t2)
+    | List(t1'), List(t2') -> List(collapse_types t1' t2')
     | Func(os1), Func(os2) -> Func(os1 @ os2)
     | Union(ts), x | x, Union(ts) -> Union(Set.add x ts)
     | _, _ -> Union(Set.ofList [t1; t2])
