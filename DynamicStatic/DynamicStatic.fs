@@ -276,6 +276,9 @@ let rec unify (sub : Type) (super : Type) (cset: Set<Constraint>) : UnificationR
 
     | PolyType(id), _ | _, PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
 
+    //don't add reflexive rules
+    | TypeId(id1), TypeId(id2) when id1 = id2 -> Success(cset)
+    
     | TypeId(id), _          -> Success(cset_add (id, super) cset)
     | _,          TypeId(id) -> Success(generalize_rule cset id sub)
 
@@ -497,13 +500,19 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
 
 let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
     let merge_types cset' t1 t2 =
-        let cset' = Set.ofList cset'
-        match unify t1 t2 cset' with
-        | Success(cset'') -> Some(t1, Set.toList cset'')
-        | Failure(_, _) ->
-            match unify t2 t1 cset' with
-            | Success(cset'') -> Some(t2, Set.toList cset'')
-            | Failure(_, _) -> None
+        let merge_types' cset' t1 t2 =
+            let cset' = Set.ofList cset'
+            match unify t1 t2 cset' with
+            | Success(cset'') -> Some(t1, Set.toList cset'')
+            | Failure(_, _) ->
+                match unify t2 t1 cset' with
+                | Success(cset'') -> Some(t2, Set.toList cset'')
+                | Failure(_, _) -> None
+        match (t1, t2) with
+        | TypeId(_), _ -> merge_types' cset' t1 t2
+        | _, TypeId(_) -> merge_types' cset' t2 t1
+        | _            -> merge_types' cset' t1 t2
+        
     let rec merge_all map = function
         | (id, t)::cset' ->
             match Map.tryFind id map with
@@ -648,8 +657,8 @@ let fact = Let(["fact"], [Fun("n",
 let Test() =
     let test = type_check >> type2str >> printfn "%s"
     //test id;
-    test trueFalse;
-    //test omega;
+    //test trueFalse;
+    test omega;
     //test fact;
     //test overloadCall;
     //test filter;
