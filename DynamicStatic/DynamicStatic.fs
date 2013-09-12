@@ -111,7 +111,7 @@ let rec uset_add t uset =
                     add (Set.add t set) t ts
                 else
                     add (Set.add t' set) t ts
-        | [] -> set
+        | [] -> Set.add t set
     match t with
     | Union(ts) -> Seq.fold (fun a t -> uset_add t a) uset ts
     | _ -> add Set.empty t <| Set.toList uset
@@ -461,18 +461,7 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
             let true_type, cset''' = build_cset (t_expr, t_cft) cset''
             match constrain t_cft cset''' true_type <| PolyType(return_id) with
             // true type unified with return type
-            | Success(cset'''') -> 
-                match constrain cft cset''' test_type <| Union(Set.ofList [True; False]) with
-                // test type is True|False
-                | Success(cset''''') -> 
-                    let false_type, cset'''''' = build_cset (f_expr, f_cft) cset'''''
-                    match constrain f_cft cset'''''' false_type <| PolyType(return_id) with
-                    // false type unified with return type
-                    | Success(cset''''''') -> PolyType(return_id), cset'''''''
-                    // error
-                    | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
-                // test type is ONLY True
-                | Failure(t1, t2) -> true_type, cset''''
+            | Success(cset'''') -> true_type, cset''''
             // error
             | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
         // test type is not True
@@ -483,39 +472,28 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
                 let false_type, cset''' = build_cset (f_expr, f_cft) cset''
                 match constrain f_cft cset''' false_type <| PolyType(return_id) with
                 // false type unified with return type
-                | Success(cset'''') -> 
-                    match constrain cft cset'''' test_type <| Union(Set.ofList [True; False]) with
-                    // Test type is True|False
-                    | Success(cset'') -> 
-                        let true_type, cset''' = build_cset (t_expr, t_cft) cset''
-                        match constrain t_cft cset''' true_type <| PolyType(return_id) with
-                        // true type unified with return type
-                        | Success(cset'''') -> PolyType(return_id), cset''''
-                        // error
-                        | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
-                    // test type is ONLY False
-                    | Failure(t1, t2) -> false_type, cset''''
+                | Success(cset'''') -> false_type, cset''''
                 // error
                 | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
-            // test type can only be True|False
-            | Failure(t1, t2) ->
-                match constrain cft cset' test_type <| Union(Set.ofList [True; False]) with
-                // Test type is True|False
-                | Success(cset'') -> 
-                    let true_type, cset''' = build_cset (t_expr, t_cft) cset''
-                    match constrain t_cft cset''' true_type <| PolyType(return_id) with
-                    // true type unified with return type
-                    | Success(cset'''') ->
-                        let false_type, cset'''''' = build_cset (f_expr, f_cft) cset''''
-                        match constrain f_cft cset'''''' false_type <| PolyType(return_id) with
-                        // false type unified with return type
-                        | Success(cset''''''') -> PolyType(return_id), cset'''''''
-                        // error
-                        | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
-                    // error
-                    | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
-                // test type is ONLY False
-                | Failure(t1, t2) -> failwith "Unification Failure (build_vset.If) Test could not be constrained to True|False"
+            // last try with True|False
+            | Failure(t1, t2) -> 
+                 match constrain cft cset' test_type <| Union(Set.ofList [True; False]) with
+                 // Test type is True|False
+                 | Success(cset'') -> 
+                     let true_type, cset''' = build_cset (t_expr, t_cft) cset''
+                     match constrain t_cft cset''' true_type <| PolyType(return_id) with
+                     // true type unified with return type
+                     | Success(cset'''') ->
+                         let false_type, cset'''''' = build_cset (f_expr, f_cft) cset''''
+                         match constrain f_cft cset'''''' false_type <| PolyType(return_id) with
+                         // false type unified with return type
+                         | Success(cset''''''') -> PolyType(return_id), cset'''''''
+                         // error
+                         | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
+                     // error
+                     | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
+                 // test type is ONLY False
+                 | Failure(t1, t2) -> failwith "Unification Failure (build_vset.If) Test could not be constrained to True|False"
 
 let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
     let merge_types cset' t1 t2 =
@@ -655,7 +633,7 @@ let filter =
 
 let id = Let(["id"], [Fun("x", Type_E(PolyType("x")))], Type_E(PolyType("id")))
 
-let trueFalse = If(Type_E(True), Type_E(True), Type_E(False))
+let trueFalse = If(Type_E(Union(Set.ofList [True; False])), Type_E(True), Type_E(False))
 
 let overloadCall = Call(Type_E(Func(Set.ofList [True, False; False, True])), Type_E(True))
 
