@@ -541,29 +541,29 @@ let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
             | Some(t') -> Some(List(t'))
             | None -> None
         | Func(os) ->
-            let rec fold_os os' = function
+            let rec fold_os folded os' = function
                 | (param_type, body_type)::os'' ->
                     match fold_constraint id param_type with
                     | Some(p) ->
                         match fold_constraint id body_type with
-                        | Some(t) -> fold_os (Set.add (p, t) os') os''
-                        | None -> None
-                    | None -> None
-                | [] -> Some(os')
-            match fold_os Set.empty <| Set.toList os with
+                        | Some(t) -> fold_os true (oset_add (p, t) os') os''
+                        | None -> fold_os true (oset_add (p, body_type) os') os''
+                    | None ->
+                        match fold_constraint id body_type with
+                        | Some(t) -> fold_os true (oset_add (param_type, t) os') os''
+                        | None -> fold_os false (oset_add (param_type, body_type) os') os''
+                | [] -> if folded then Some(os') else None
+            match fold_os false Set.empty <| Set.toList os with
             | Some(os') -> Some(Func(os'))
             | None -> None
         | Union(ts) ->
-            let ts_folder s t =
-                match s with
-                | Some(ts') ->
-                    match fold_constraint id t with
-                    | Some(t') -> Some(Set.add t' ts')
-                    | None -> None
-                | None -> None
-            match Set.fold ts_folder (Some(Set.empty)) ts with
-            | Some(ts') -> Some(Union(ts'))
-            | None -> None
+            let ts_folder (folded, s) t =
+                match fold_constraint id t with
+                | Some(t') -> true, uset_add t' s
+                | None -> folded, uset_add t s
+            match Set.fold ts_folder (false, Set.empty) ts with
+            | true, ts' -> Some(Union(ts'))
+            | false, _ -> None
         | _ -> None
     let rec fold_all again cset' = function
         | (id, t)::cs ->
@@ -658,10 +658,10 @@ let Test() =
     let test = type_check >> type2str >> printfn "%s"
     //test id;
     //test trueFalse;
-    test omega;
+    //test omega;
     //test fact;
     //test overloadCall;
-    //test filter;
+    test filter;
 
 (*  ;; flatten :: A -> Z
     (define (flatten l)
