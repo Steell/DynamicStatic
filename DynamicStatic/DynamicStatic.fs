@@ -531,7 +531,7 @@ let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
 let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
     let rec is_recursive id type_constraint =
         match type_constraint with
-        | TypeId(id') when id = id -> true
+        | TypeId(id') when id = id' -> true
         | List(t) -> is_recursive id t
         | Func(os) -> Set.exists (fun (pt, ot) -> is_recursive id pt || is_recursive id ot) os
         | Union(ts) -> Set.exists (is_recursive id) ts
