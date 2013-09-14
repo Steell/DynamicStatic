@@ -42,6 +42,9 @@ and overload2str (ps, r) =
 
 type Constraint = string * Type
 
+let cset2str cs =
+    String.concat "\n" <| Seq.map (fun (id, rule) -> sprintf "%-10s := %s" id <| type2str rule) cs
+
 let constraint_is_reflexive (id, rule) =
     match rule with
     | TypeId(id') when id = id' -> true
@@ -220,6 +223,10 @@ type TypeExpression =
     | Call of TypeExpression * TypeExpression
     | If of TypeExpression * TypeExpression * TypeExpression
     | Begin of TypeExpression list
+    
+type UnificationResult =
+    | Success of Set<Constraint>
+    | Failure of Type * Type
 
 let generalize_rule cset id t =
     let rec generalize_type cset = function
@@ -252,22 +259,18 @@ let generalize_rule cset id t =
         | t -> t, cset
 
     let t', cset' = generalize_type cset t
-    cset_add (id, t') cset'
-    
-type UnificationResult =
-    | Success of Set<Constraint>
-    | Failure of Type * Type
+    Success(cset_add (id, t') cset')
 
-let rec unify (sub : Type) (super : Type) (cset: Set<Constraint>) : UnificationResult = 
+let rec unify generalize (sub : Type) (super : Type) (cset: Set<Constraint>) : UnificationResult = 
     let rec all_unify cset' super = function
         | sub::ts -> 
-            match unify sub super cset' with
+            match unify generalize sub super cset' with
             | Success(cset'') -> all_unify cset'' super ts
             | failure -> Some(failure), cset'
         | [] -> None, cset'
     let rec unifies_with_any cset' sub = function
         | super::ts ->
-            match unify sub super cset' with
+            match unify generalize sub super cset' with
             | Success(_) as s -> Some(s)
             | Failure(_, _) -> unifies_with_any cset' sub ts
         | [] -> None
@@ -280,12 +283,12 @@ let rec unify (sub : Type) (super : Type) (cset: Set<Constraint>) : UnificationR
     | TypeId(id1), TypeId(id2) when id1 = id2 -> Success(cset)
     
     | TypeId(id), _          -> Success(cset_add (id, super) cset)
-    | _,          TypeId(id) -> Success(generalize_rule cset id sub)
+    | _,          TypeId(id) -> generalize cset id sub
 
-    | List(sub'), List(super') -> unify sub' super' cset
+    | List(sub'), List(super') -> unify generalize sub' super' cset
     
     | Union(subs), _ -> 
-        match all_unify cset super <| Set.toList subs with 
+        match all_unify  cset super <| Set.toList subs with 
         | Some(failure), _ -> failure 
         | None, cset'      -> Success(cset')
 
@@ -297,9 +300,9 @@ let rec unify (sub : Type) (super : Type) (cset: Set<Constraint>) : UnificationR
     | Func(sub_os'), Func(super_os') -> 
         // Unification successful if everything in super_os' unifies with something in sub_os'
         let unify_overload (sub_arg, sub_return) (super_arg, super_return) cset' =
-            match unify super_arg sub_arg cset' with
+            match unify generalize super_arg sub_arg cset' with
             | Success(cset'') ->
-                match unify sub_return super_return cset'' with
+                match unify generalize sub_return super_return cset'' with
                 | Success(cset''') -> Some(cset''')
                 | _ -> None
             | _ -> None
@@ -390,7 +393,7 @@ let rec constrain (cft : ControlFlowTree) (cset : Set<Constraint>) (sub_type : T
         | Some(cft_subtype) ->
             match cft_map_lookup map super_type with
             | Some(cft_supertype) ->
-                unify cft_subtype cft_supertype cset'
+                unify generalize_rule cft_subtype cft_supertype cset'
             | None -> Failure(sub_type, super_type) // Maybe we should
         | None -> Failure(sub_type, super_type)     // succeed here?
     match cft with
@@ -458,7 +461,7 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
         let test_type, cset' = build_cset (test, cft) cset
         let t_cft = cft_branch t_idx cft
         let f_cft = cft_branch f_idx cft
-        match constrain t_cft cset' test_type True with
+        (*match constrain t_cft cset' test_type True with
         // test type is True
         | Success(cset'') -> 
             let true_type, cset''' = build_cset (t_expr, t_cft) cset''
@@ -479,33 +482,34 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
                 // error
                 | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
             // last try with True|False
-            | Failure(t1, t2) -> 
-                 match constrain cft cset' test_type <| Union(Set.ofList [True; False]) with
-                 // Test type is True|False
-                 | Success(cset'') -> 
-                     let true_type, cset''' = build_cset (t_expr, t_cft) cset''
-                     match constrain t_cft cset''' true_type <| PolyType(return_id) with
-                     // true type unified with return type
-                     | Success(cset'''') ->
-                         let false_type, cset'''''' = build_cset (f_expr, f_cft) cset''''
-                         match constrain f_cft cset'''''' false_type <| PolyType(return_id) with
-                         // false type unified with return type
-                         | Success(cset''''''') -> PolyType(return_id), cset'''''''
-                         // error
-                         | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
-                     // error
-                     | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
-                 // test type is ONLY False
-                 | Failure(t1, t2) -> failwith "Unification Failure (build_vset.If) Test could not be constrained to True|False"
+            | Failure(t1, t2) -> *)
+        match constrain cft cset' test_type <| Union(Set.ofList [True; False]) with
+        // Test type is True|False
+        | Success(cset'') -> 
+            let true_type, cset''' = build_cset (t_expr, t_cft) cset''
+            match constrain t_cft cset''' true_type <| PolyType(return_id) with
+            // true type unified with return type
+            | Success(cset'''') ->
+                let false_type, cset'''''' = build_cset (f_expr, f_cft) cset''''
+                match constrain f_cft cset'''''' false_type <| PolyType(return_id) with
+                // false type unified with return type
+                | Success(cset''''''') -> PolyType(return_id), cset'''''''
+                // error
+                | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
+            // error
+            | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
+        // test type is ONLY False
+        | Failure(t1, t2) -> failwith "Unification Failure (build_vset.If) Test could not be constrained to True|False"
 
 let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
     let merge_types cset' t1 t2 =
+        let unify' = unify <| fun cset id t -> Failure(TypeId(id), t)
         let merge_types' cset' t1 t2 =
             let cset' = Set.ofList cset'
-            match unify t1 t2 cset' with
+            match unify' t1 t2 cset' with
             | Success(cset'') -> Some(t1, Set.toList cset'')
             | Failure(_, _) ->
-                match unify t2 t1 cset' with
+                match unify' t2 t1 cset' with
                 | Success(cset'') -> Some(t2, Set.toList cset'')
                 | Failure(_, _) -> None
         match (t1, t2) with
@@ -599,7 +603,12 @@ let collapse_cft (cft : ControlFlowTree) (cset : Map<string, Type>) : Map<string
 let type_check expr =
     let (cft, cte) = build_cft expr
     let t, cset = build_cset (cte, cft) Set.empty
-    let map = merge_duplicate_rules cset |> fold_type_constants
+    let set_str = cset2str cset
+    //printfn "%s" set_str;
+    let merged_map = merge_duplicate_rules cset
+    let set_str' = cset2str <| Map.toSeq merged_map
+    let map = fold_type_constants merged_map
+    let set_str'' = cset2str <| Map.toSeq map
     let lookup = collapse_cft cft map
     let rec update_type = function
         | PolyType(id) -> Map.find id lookup
@@ -629,7 +638,7 @@ let filter =
                                                Type_E(PolyType("l")))], 
                                 If(Call(Type_E(PolyType("p")), 
                                         Type_E(PolyType("x"))), 
-                                    Call(Call(Type_E(Func(Set.ofList [PolyType("C"), Func(Set.ofList [List(PolyType("C")), List(PolyType("C"))])])), 
+                                    Call(Call(Type_E(Func(Set.ofList [PolyType("C"), Func(Set.ofList [List(PolyType("D")), List(Union(Set.ofList [PolyType("C"); PolyType("D")]))])])), 
                                               Type_E(PolyType("x"))),
                                         Call(Call(Type_E(PolyType("filter")), 
                                                   Call(Type_E(Func(Set.ofList [List(PolyType("K")), List(PolyType("K"))])),Type_E(PolyType("l")))), 
