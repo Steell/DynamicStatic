@@ -3,7 +3,7 @@
 let guess_maker() =
     let rec numbers_from n =
         seq { yield n; yield! numbers_from (n+1) }
-    seq { for n in numbers_from 0 -> sprintf "%i_temp_" n }
+    seq { for n in numbers_from 0 -> sprintf "_%i_temp_" n }
 
 let guesses = guess_maker().GetEnumerator()
 let fresh_var() =
@@ -35,7 +35,7 @@ let rec type2str = function
     | List(t) -> sprintf "List<%s>" <| type2str t
     | Func(os) when os.Count = 1 -> overload2str os.MinimumElement
     | Func(os) -> sprintf "(%s)" <| String.concat "+" (Seq.map overload2str os)
-    | Union(ts) -> String.concat "|" <| Seq.map type2str ts
+    | Union(ts) -> sprintf "{%s}" <| String.concat "|" (Seq.map type2str ts)
 
 and overload2str (ps, r) = 
     sprintf "(%s -> %s)" (type2str ps) (type2str r)
@@ -115,6 +115,7 @@ let rec uset_add t uset =
                 else
                     add (Set.add t' set) t ts
         | [] -> Set.add t set
+
     match t with
     | Union(ts) -> Seq.fold (fun a t -> uset_add t a) uset ts
     | _ -> add Set.empty t <| Set.toList uset
@@ -124,7 +125,7 @@ and oset_add overload oset : Set<Overload> =
     let combine_overloads o1 o2 =
         let sub_param, sub_return = o1
         let super_param, super_return = o2
-        let make_union t1 t2 = Union(uset_add t2 <| uset_add t1 Set.empty)
+        let make_union t1 t2 = make_union [t1; t2]
         if sub_param = super_param then
              // if returns are functions make sure they are combined into a single overloaded function
             Some(sub_param, make_union sub_return super_return)
@@ -145,6 +146,14 @@ and oset_add overload oset : Set<Overload> =
         | [] -> Set.add o set
 
     add Set.empty overload <| Set.toList oset
+
+and make_union types =
+    let uset = List.foldBack uset_add types Set.empty
+    if uset.Count = 1 then
+        uset.MinimumElement
+    else
+        Union(uset)
+
 
 type ControlFlowTree = 
     | Leaf of Map<string, string> 
@@ -244,9 +253,12 @@ let generalize_rule cset id t =
         | Union(ts) ->
             let union_folder (ts', cset') t =
                 let t', cset'' = generalize_type cset' t
-                Set.add t' ts', cset''
+                uset_add t' ts', cset''
             let ts', cset' = Set.fold union_folder (Set.empty, cset) ts
-            Union(ts'), cset'
+            if ts'.Count = 1 then
+                ts'.MinimumElement, cset'
+            else
+                Union(ts'), cset'
 
         | Func(os) ->
             let overload_folder (os', cset') (param_type, return_type) =
@@ -275,8 +287,6 @@ let rec unify generalize (sub : Type) (super : Type) (cset: Set<Constraint>) : U
             | Failure(_, _) -> unifies_with_any cset' sub ts
         | [] -> None
     match sub, super with
-    | _, Any | Func(_), Atom -> Success(cset)
-
     | PolyType(id), _ | _, PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
 
     //don't add reflexive rules
@@ -284,6 +294,8 @@ let rec unify generalize (sub : Type) (super : Type) (cset: Set<Constraint>) : U
     
     | TypeId(id), _          -> Success(cset_add (id, super) cset)
     | _,          TypeId(id) -> generalize cset id sub
+
+    | _, Any | Func(_), Atom -> Success(cset)
 
     | List(sub'), List(super') -> unify generalize sub' super' cset
     
@@ -441,14 +453,31 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
         | Failure(t1, t2) -> failwith "Unification Failure (build_cset.Let)."
     | CFun(param_name, body_expr) ->
         let body_type, cset' = build_cset (body_expr, cft) cset
-        overload_function cft (param_name, body_type), cset'
+        Func(Set.ofList [PolyType(param_name), body_type]), cset'
     | CCall(func_expr, arg_expr, return_id) ->
         let func_type, cset' = build_cset (func_expr, cft) cset
         let arg_type, cset'' = build_cset (arg_expr, cft) cset'
-        let func = Func(Set.ofList [arg_type, PolyType(return_id)])
-        match constrain cft cset'' func func_type with
-        | Success(cset''') -> PolyType(return_id), cset'''
-        | Failure(t1, t2) -> failwith "Unification Failure (build_cset.Call) Could not constrain function call types."
+
+        match func_type with
+        | Func(os) ->
+            let rec constrain_os cset''' rtn_set = function
+                | (arg_type', rtn)::os' ->
+                    match constrain cft cset'' arg_type arg_type' with
+                    | Success(cset'''') -> constrain_os cset'''' (uset_add rtn rtn_set) os'
+                    | _ -> constrain_os cset''' rtn_set os'
+                | [] -> 
+                    if rtn_set.IsEmpty then
+                        failwith "Unification failure (build_cset.Call) Could not constrain function call types."
+                    else
+                        Union(rtn_set), cset'''
+            constrain_os cset'' Set.empty <| Set.toList os
+                        
+        | _ ->
+            let func = Func(Set.ofList [arg_type, PolyType(return_id)])
+            match constrain cft cset'' func_type func with
+            | Success(cset''') -> PolyType(return_id), cset'''
+            | Failure(t1, t2) -> failwith "Unification failure (build_cset.Call) Could not constrain function call types."
+
     | CBegin(exprs) ->
         let rec begin_exprs cset' = function
             | []           -> Unit, cset'
@@ -487,11 +516,11 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
         // Test type is True|False
         | Success(cset'') -> 
             let true_type, cset''' = build_cset (t_expr, t_cft) cset''
-            match constrain t_cft cset''' true_type <| PolyType(return_id) with
+            match constrain t_cft cset''' (PolyType(return_id)) true_type with
             // true type unified with return type
             | Success(cset'''') ->
                 let false_type, cset'''''' = build_cset (f_expr, f_cft) cset''''
-                match constrain f_cft cset'''''' false_type <| PolyType(return_id) with
+                match constrain f_cft cset'''''' (PolyType(return_id)) false_type with
                 // false type unified with return type
                 | Success(cset''''''') -> PolyType(return_id), cset'''''''
                 // error
@@ -503,7 +532,7 @@ let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constrain
 
 let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
     let merge_types cset' t1 t2 =
-        let unify' = unify <| fun cset id t -> Failure(TypeId(id), t)
+        let unify' = unify <| fun cset'' id t -> Failure(TypeId(id), t) //Success(cset_add (id, t) cset'')
         let merge_types' cset' t1 t2 =
             let cset' = Set.ofList cset'
             match unify' t1 t2 cset' with
@@ -513,7 +542,7 @@ let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
                 | Success(cset'') -> Some(t2, Set.toList cset'')
                 | Failure(_, _) -> None
         match (t1, t2) with
-        | TypeId(_), _ -> merge_types' cset' t1 t2
+        | TypeId(id1), TypeId(id2) when id1 <> id2 -> Some(t1, (id2, t1)::cset')
         | _, TypeId(_) -> merge_types' cset' t2 t1
         | _            -> merge_types' cset' t1 t2
         
@@ -521,7 +550,7 @@ let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
         | (id, t)::cset' ->
             match Map.tryFind id map with
             | Some(t') ->
-                match merge_types cset' t t' with
+                match merge_types cset' t' t with
                 | Some(t'', cset'') -> merge_all (cmap_add id t'' map) cset''
                 | None -> failwith "Could not merge types."
             | None -> merge_all (cmap_add id t map) cset'
@@ -537,23 +566,29 @@ let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
         | Union(ts) -> Set.exists (is_recursive id) ts
         | _ -> false
     let lookup = Map.filter (fun id t -> not <| is_recursive id t) cset
-    let rec fold_constraint id type_constraint = 
+    let rec fold_constraint lookup id type_constraint = 
         match type_constraint with
-        | TypeId(id') when id' <> id -> Map.tryFind id' lookup
+        | TypeId(id') when id' <> id -> 
+            match Map.tryFind id' lookup with
+            | Some(t) -> 
+                match fold_constraint (Map.remove id' lookup) id t with
+                | None -> Some(t)
+                | x -> x
+            | None -> None
         | List(t) ->
-            match fold_constraint id t with
+            match fold_constraint lookup id t with
             | Some(t') -> Some(List(t'))
             | None -> None
         | Func(os) ->
             let rec fold_os folded os' = function
                 | (param_type, body_type)::os'' ->
-                    match fold_constraint id param_type with
+                    match fold_constraint lookup id param_type with
                     | Some(p) ->
-                        match fold_constraint id body_type with
+                        match fold_constraint lookup id body_type with
                         | Some(t) -> fold_os true (oset_add (p, t) os') os''
                         | None -> fold_os true (oset_add (p, body_type) os') os''
                     | None ->
-                        match fold_constraint id body_type with
+                        match fold_constraint lookup id body_type with
                         | Some(t) -> fold_os true (oset_add (param_type, t) os') os''
                         | None -> fold_os false (oset_add (param_type, body_type) os') os''
                 | [] -> if folded then Some(os') else None
@@ -562,7 +597,7 @@ let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
             | None -> None
         | Union(ts) ->
             let ts_folder (folded, s) t =
-                match fold_constraint id t with
+                match fold_constraint lookup id t with
                 | Some(t') -> true, uset_add t' s
                 | None -> folded, uset_add t s
             match Set.fold ts_folder (false, Set.empty) ts with
@@ -571,8 +606,8 @@ let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
         | _ -> None
     let rec fold_all again cset' = function
         | (id, t)::cs ->
-            match fold_constraint id t with
-            | Some(t') -> fold_all true cset' <| (id, t')::cs
+            match fold_constraint (Map.remove id lookup) id t with
+            | Some(t') -> fold_all true (cmap_add id t' cset') cs
             | None -> fold_all again (cmap_add id t cset') cs
         | [] -> 
             if again then
@@ -590,7 +625,7 @@ let collapse_cft (cft : ControlFlowTree) (cset : Map<string, Type>) : Map<string
                 | None -> TypeId(id)
             let t' =
                 match Map.tryFind poly_id map with
-                | Some(t') -> Union(List.foldBack uset_add [t; t'] Set.empty)
+                | Some(t') -> make_union [t; t']
                 | None -> t
             collapse_map (Map.add poly_id t' map) cs
         | [] -> map
@@ -600,8 +635,18 @@ let collapse_cft (cft : ControlFlowTree) (cset : Map<string, Type>) : Map<string
         | Branch(trees) -> List.fold collapse map trees
     collapse Map.empty cft
 
+let cft2str cft =
+    let i = ref -1
+    let rec cft2str = function
+        | Leaf(map) -> 
+            i := !i + 1;
+            String.concat "\n" <| Seq.map (fun (p_id, t_id) -> sprintf "%s = %s[%d]" t_id p_id !i) (Map.toSeq map)
+        | Branch(trees) -> String.concat "\n\n====================\n\n" <| List.map cft2str trees
+    cft2str cft
+
 let type_check expr =
     let (cft, cte) = build_cft expr
+    let cft_str = cft2str cft
     let t, cset = build_cset (cte, cft) Set.empty
     let set_str = cset2str cset
     //printfn "%s" set_str;
