@@ -1,4 +1,4 @@
-﻿module DynamicStatic
+﻿module DynamicStatic.DS
 
 let guess_maker() =
     let rec numbers_from n =
@@ -24,13 +24,28 @@ type Type =
 
 and Overload = Type * Type
        
-let rec type2str = function
+let rec type2str t =
+    let rec infinite_letters =
+        let a2z = "abcdefghijklmnopqrstuvwxyz"
+        seq { yield! a2z; yield! infinite_letters }
+    let letters = infinite_letters.GetEnumerator()
+    let fresh_letter() =
+        ignore <| letters.MoveNext();
+        letters.Current
+    let mutable lookup = Map.empty
+    match t with
     | Any -> "Any"
     | Atom -> "Atom"
     | Unit -> "IO"
     | True -> "True"
     | False -> "False"
-    | TypeId(id) -> sprintf "'%s" id
+    | TypeId(id) -> 
+        match Map.tryFind id lookup with
+        | Some(id') -> sprintf "'%c" id'
+        | None ->
+            let new_var = fresh_letter()
+            lookup <- Map.add id new_var lookup;
+            sprintf "'%c" new_var
     | PolyType(id) -> sprintf "Poly(%s)" id
     | List(t) -> sprintf "List<%s>" <| type2str t
     | Func(os) when os.Count = 1 -> overload2str os.MinimumElement
@@ -559,64 +574,67 @@ let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
         | [] -> map
     merge_all Map.empty <| Set.toList cset
 
-let rec fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
-    let rec is_recursive id type_constraint =
-        match type_constraint with
-        | TypeId(id') when id = id' -> true
-        | List(t) -> is_recursive id t
-        | Func(os) -> Set.exists (fun (pt, ot) -> is_recursive id pt || is_recursive id ot) os
-        | Union(ts) -> Set.exists (is_recursive id) ts
-        | _ -> false
-    let lookup = Map.filter (fun id t -> not <| is_recursive id t) cset
-    let rec fold_constraint lookup id type_constraint = 
-        match type_constraint with
-        | TypeId(id') when id' <> id -> 
-            match Map.tryFind id' lookup with
-            | Some(t) -> 
-                match fold_constraint (Map.remove id' lookup) id t with
-                | None -> Some(t)
-                | x -> x
-            | None -> None
-        | List(t) ->
-            match fold_constraint lookup id t with
-            | Some(t') -> Some(List(t'))
-            | None -> None
-        | Func(os) ->
-            let rec fold_os folded os' = function
-                | (param_type, body_type)::os'' ->
-                    match fold_constraint lookup id param_type with
-                    | Some(p) ->
-                        match fold_constraint lookup id body_type with
-                        | Some(t) -> fold_os true (oset_add (p, t) os') os''
-                        | None -> fold_os true (oset_add (p, body_type) os') os''
-                    | None ->
-                        match fold_constraint lookup id body_type with
-                        | Some(t) -> fold_os true (oset_add (param_type, t) os') os''
-                        | None -> fold_os false (oset_add (param_type, body_type) os') os''
-                | [] -> if folded then Some(os') else None
-            match fold_os false Set.empty <| Set.toList os with
-            | Some(os') -> Some(Func(os'))
-            | None -> None
-        | Union(ts) ->
-            let ts_folder (folded, s) t =
-                match fold_constraint lookup id t with
-                | Some(t') -> true, uset_add t' s
-                | None -> folded, uset_add t s
-            match Set.fold ts_folder (false, Set.empty) ts with
-            | true, ts' -> Some(Union(ts'))
-            | false, _ -> None
-        | _ -> None
-    let rec fold_all again cset' = function
-        | (id, t)::cs ->
-            match fold_constraint (Map.remove id lookup) id t with
-            | Some(t') -> fold_all true (cmap_add id t' cset') cs
-            | None -> fold_all again (cmap_add id t cset') cs
-        | [] -> 
-            if again then
-                fold_type_constants cset'
-            else
-                cset'
-    fold_all false Map.empty <| Map.toList cset
+let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
+    
+    let rec contains_vars = function
+        | TypeId(id') -> Map.containsKey id' cset
+        | List(t)     -> contains_vars t
+        | Func(os)    -> Set.exists (fun (pt, ot) -> contains_vars pt || contains_vars ot) os
+        | Union(ts)   -> Set.exists contains_vars ts
+        | _           -> false
+    
+    let rec folder lookup to_fold =
+    
+        let rec fold_constraint lookup = function
+            | TypeId(id) -> Map.tryFind id lookup
+            | List(t) ->
+                match fold_constraint lookup t with
+                | Some(t') -> Some(List(t'))
+                | None -> None
+            | Func(os) ->
+                let rec fold_os folded os' = function
+                    | (param_type, body_type)::os'' ->
+                        match fold_constraint lookup param_type with
+                        | Some(p) ->
+                            match fold_constraint lookup body_type with
+                            | Some(t) -> fold_os true (oset_add (p, t) os') os''
+                            | None -> fold_os true (oset_add (p, body_type) os') os''
+                        | None ->
+                            match fold_constraint lookup body_type with
+                            | Some(t) -> fold_os true (oset_add (param_type, t) os') os''
+                            | None -> fold_os false (oset_add (param_type, body_type) os') os''
+                    | [] -> if folded then Some(os') else None
+                match fold_os false Set.empty <| Set.toList os with
+                | Some(os') -> Some(Func(os'))
+                | None -> None
+            | Union(ts) ->
+                let ts_folder (folded, s) t =
+                    match fold_constraint lookup t with
+                    | Some(t') -> true, uset_add t' s
+                    | None -> folded, uset_add t s
+                match Set.fold ts_folder (false, Set.empty) ts with
+                | true, ts' -> Some(Union(ts'))
+                | false, _ -> None
+            | _ -> None
+
+        let rec fold_all again lookup a = function
+            | (id, t)::cs ->
+                match fold_constraint lookup t with
+                | Some(t') -> fold_all true lookup (cmap_add id t' a) cs
+                | None     -> fold_all again lookup (cmap_add id t a) cs
+            | [] -> 
+                if again then
+                    let to_fold', lookup' = Map.partition (fun _ -> contains_vars) a
+                    let lookup'' = Map.foldBack Map.add lookup' lookup
+                    folder lookup'' <| Map.toList to_fold'
+                else
+                    Map.foldBack Map.add a lookup
+                        
+        fold_all false lookup Map.empty to_fold
+
+    let to_fold, lookup = Map.partition (fun _ -> contains_vars) cset
+    
+    folder lookup <| Map.toList to_fold
 
 let collapse_cft (cft : ControlFlowTree) (cset : Map<string, Type>) : Map<string, Type> =
     let rec collapse_map map = function

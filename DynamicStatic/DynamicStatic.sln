@@ -3,6 +3,8 @@ Microsoft Visual Studio Solution File, Format Version 11.00
 # Visual Studio 2010
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "DynamicStatic", "DynamicStatic.fsproj", "{4CDAE1C8-B9E1-4540-A13C-9DC230AB53A2}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DynamicStaticTests", "..\DynamicStaticTests\DynamicStaticTests.csproj", "{FE49F055-90BE-4F19-9B03-859508ECC38C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -13,6 +15,10 @@ Global
 		{4CDAE1C8-B9E1-4540-A13C-9DC230AB53A2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4CDAE1C8-B9E1-4540-A13C-9DC230AB53A2}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4CDAE1C8-B9E1-4540-A13C-9DC230AB53A2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FE49F055-90BE-4F19-9B03-859508ECC38C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FE49F055-90BE-4F19-9B03-859508ECC38C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FE49F055-90BE-4F19-9B03-859508ECC38C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FE49F055-90BE-4F19-9B03-859508ECC38C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
