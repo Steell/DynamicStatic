@@ -292,8 +292,10 @@ let rec unify generalize (sub : Type) (super : Type) (cset: Set<Constraint>) : U
     //don't add reflexive rules
     | TypeId(id1), TypeId(id2) when id1 = id2 -> Success(cset)
     
-    | TypeId(id), _          -> Success(cset_add (id, super) cset)
-    | _,          TypeId(id) -> generalize cset id sub
+    (*| TypeId(id), _          -> Success(cset_add (id, super) cset)
+    | _,          TypeId(id) -> generalize cset id sub*)
+
+    | TypeId(id), _ | _, TypeId(id) -> Success(cset_add (id, super) cset)
 
     | _, Any | Func(_), Atom -> Success(cset)
 
