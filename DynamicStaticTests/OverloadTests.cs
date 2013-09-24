@@ -50,9 +50,11 @@ namespace DynamicStaticTests
         [Test]
         public void FilterDefinition()
         {
+            var actual = DS.type2str(DS.type_check(DS.filter));
+
             Assert.AreEqual(
                 "(List<{'a|'b}> -> ((('a -> True)+('b -> False)) -> List<'a>))",
-                DS.type2str(DS.type_check(DS.filter)));
+                actual);
         }
     }
 }

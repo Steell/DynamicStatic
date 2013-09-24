@@ -13,16 +13,16 @@ namespace DynamicStaticTests
         [Test]
         public void OmegaDefinition()
         {
-            Assert.AreEqual("('a -> 'b) where 'a = ('a -> 'b)", DS.type2str(DS.type_check(DS.omega)));
+            Assert.AreEqual("'a where 'a = ('a -> 'b)", DS.type2str(DS.type_check(DS.omega)));
         }
 
-        [Test]
+        [Test, Timeout(2000)]
         public void YDefinition()
         {
             Assert.AreEqual("((('a -> 'b) -> ('a -> 'b)) -> ('a -> 'b))", DS.type2str(DS.type_check(DS.yComb)));
         }
 
-        [Test]
+        [Test, Timeout(2000)]
         public void Y_FactorialDefinition()
         {
             Assert.AreEqual("(Atom -> Atom)", DS.type2str(DS.type_check(DS.factY)));

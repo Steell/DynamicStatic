@@ -57,10 +57,26 @@ let type2str t =
     
     type2str t
 
+let rec type_2_str t =
+    let overload2str (ps, r) = 
+        sprintf "(%s -> %s)" (type_2_str ps) (type_2_str r)
+    match t with
+    | Any -> "Any"
+    | Atom -> "Atom"
+    | Unit -> "IO"
+    | True -> "True"
+    | False -> "False"
+    | TypeId(id) -> id
+    | PolyType(id) -> sprintf "Poly(%s)" id
+    | List(t) -> sprintf "List<%s>" <| type_2_str t
+    | Func(os) when os.Count = 1 -> overload2str os.MinimumElement
+    | Func(os) -> sprintf "(%s)" <| String.concat "+" (Seq.map overload2str os)
+    | Union(ts) -> sprintf "{%s}" <| String.concat "|" (Seq.map type_2_str ts)
+
 type Constraint = string * Type
 
 let cset2str cs =
-    String.concat "\n" <| Seq.map (fun (id, rule) -> sprintf "%-10s := %s" id <| type2str rule) cs
+    String.concat "\n" <| Seq.map (fun (id, rule) -> sprintf "%-10s := %s" id <| type_2_str rule) cs
 
 let constraint_is_reflexive (id, rule) =
     match rule with
@@ -644,6 +660,7 @@ let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
         | [] -> map
     merge_all Map.empty <| Set.toList cset
 
+
 let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
     
     let rec contains_vars = function
@@ -707,6 +724,41 @@ let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
     folder lookup <| Map.toList to_fold
 
 
+let constrain_undefined_ids (cft : ControlFlowTree) (map : Map<string, Type>) : Map<string, Type> =
+    let rec find_undefined_ids (undef_set, all_ids) = function
+        | Leaf(leaf_map) ->
+            let folder (undef_set, all_map) poly_id type_id =
+                // does the current binding have a definition?
+                if Map.containsKey type_id map then
+                    // keep it in the cft, add it to the all_map
+                    match Map.tryFind poly_id all_map with
+                    | Some(ids) -> undef_set, Map.add poly_id (type_id::ids) all_map
+                    | None -> undef_set, Map.add poly_id [type_id] all_map
+                else
+                    // remove from cft, don't add to all_map
+                    Set.add type_id undef_set, all_map
+            Map.fold folder (undef_set, all_ids) leaf_map
+        | Branch(trees) ->
+            List.fold find_undefined_ids (undef_set, all_ids) trees
+    
+    let undef_set, all_ids = find_undefined_ids (Set.empty, Map.empty) cft
+
+    let rec update_cfts map = function
+        | Leaf(leaf_map) ->
+            let folder map' poly_id type_id =
+                if Set.contains type_id undef_set then
+                    match Map.tryFind poly_id all_ids with
+                    | Some(ids) -> Map.add type_id (Union(Set.ofList <| List.map TypeId ids)) map'
+                    | None      -> map'
+                else
+                    map'
+            Map.fold folder map leaf_map
+        | Branch(trees) ->
+            List.fold update_cfts map trees
+
+    update_cfts map cft
+
+
 let rec collapse_cft (cft : ControlFlowTree) (cmap : Map<string, Type>) (t : Type) : Type =
     
     let lookup id map =
@@ -756,8 +808,11 @@ let type_check expr =
     //printfn "%s" set_str;
     let merged_map = merge_duplicate_rules cset
     let set_str' = cset2str <| Map.toSeq merged_map
-    let map = fold_type_constants merged_map
-    let set_str'' = cset2str <| Map.toSeq map
+    let unfolded_map = constrain_undefined_ids cft merged_map
+    let set_set'' = cset2str <| Map.toSeq unfolded_map
+    let diff = cset2str (Map.toSeq <| Map.filter (fun id _ -> not <| Map.containsKey id merged_map) unfolded_map)
+    let map = fold_type_constants unfolded_map
+    let set_str''' = cset2str <| Map.toSeq map
     collapse_cft cft map t
 
 (*  ;; filter :: A B -> Z
@@ -807,6 +862,21 @@ let fact = Let(["fact"], [Fun("n",
                                  Call(Type_E(PolyType("fact")), Call(Call(Type_E(Func(Set.ofList [Atom, Func(Set.ofList [Atom, Atom])])), Type_E(PolyType("n"))), Type_E(Atom)))))], 
                Type_E(PolyType("fact")))
 
+let map = Let(["map"], [Fun("l",
+                            Fun("f",
+                                If(Call(Type_E(Func(Set.ofList [List(PolyType("A")), Union(Set.ofList [True; False])])),
+                                        Type_E(PolyType("l"))),
+                                   Type_E(List(PolyType("B"))),
+                                   Call(Call(Type_E(Func(Set.ofList [PolyType("C"), Func(Set.ofList [List(PolyType("D")), List(Union(Set.ofList [PolyType("C"); PolyType("D")]))])])), 
+                                             Call(Type_E(PolyType("f")),
+                                                  Call(Type_E(Func(Set.ofList [List(PolyType("E")), PolyType("E")])), 
+                                                       Type_E(PolyType("l"))))),
+                                        Call(Call(Type_E(PolyType("map")),
+                                                  Call(Type_E(Func(Set.ofList [List(PolyType("F")), List(PolyType("F"))])),
+                                                       Type_E(PolyType("l")))), 
+                                             Type_E(PolyType("f")))))))],
+             Type_E(PolyType("map")))
+
 let Test() =
     let test = type_check >> type2str >> printfn "%s"
     //test id;
@@ -845,16 +915,14 @@ let Test() =
     ;;   where A = A -> B
 *)
 
-let yComb =
-    Let(["Y"], [Fun("f",
-                    Call(omega, 
-                         Fun("w", 
-                             Call(Type_E(PolyType("f")), 
-                                  Fun("v", 
-                                      Call(Call(Type_E(PolyType("w")), 
-                                                Type_E(PolyType("w"))), 
-                                           Type_E(PolyType("v"))))))))],
-        Type_E(PolyType("Y")))
+let yComb = Fun("f",
+                Call(omega, 
+                     Fun("w", 
+                         Call(Type_E(PolyType("f")), 
+                              Fun("v", 
+                                  Call(Call(Type_E(PolyType("w")), 
+                                            Type_E(PolyType("w"))), 
+                                       Type_E(PolyType("v"))))))))
 
 let factY =
     Call(yComb,
