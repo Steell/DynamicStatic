@@ -1,39 +1,41 @@
-﻿module BasicTests
+﻿module DynamicStatic.Tests.BasicTests
 
 open NUnit.Framework
-open DynamicStatic
+open DynamicStatic.DS
+open DynamicStatic.Type
+open DynamicStatic.TypeExpression
 open TestUtils
 
-let type_check = type_check >> type2str
+let typecheck = type_check >> type2str
 
 
-let basic_check = Type_E >> type_check
-
-[<Test>]
-let ``Only Any``() = basic_check Any == "Any"
+let basic_check = Type_E >> typecheck
 
 [<Test>]
-let ``Only Atom``() = basic_check Atom == "Atom"
+let ``Any == Any``() = basic_check Any == "Any"
 
 [<Test>]
-let ``Only Unit``() = basic_check Unit == "IO"
+let ``Atom == Atom``() = basic_check Atom == "Atom"
 
 [<Test>]
-let ``Only True``() = basic_check True == "True"
+let ``Unit == Unit``() = basic_check Unit == "IO"
 
 [<Test>]
-let ``Only False``() = basic_check False == "False"
+let ``True == True``() = basic_check True == "True"
 
 [<Test>]
-let ``Only TypeId``() =
+let ``False == False``() = basic_check False == "False"
+
+[<Test>]
+let ``TypeId error``() =
     let test() = basic_check (TypeId("x"))
     test |> ``fails with`` "Not allowed to use TypeId(x) in TypeExpression"
 
 [<Test>]
-let ``Only PolyType``() = basic_check (PolyType("x")) == "'a"
+let ``PolyType == PolyType``() = basic_check (PolyType("x")) == "'a"
 
 [<Test>]
-let ``Only List With No Variables``() = basic_check (List(Atom)) == "List<Atom>"
+let ``List<Atom> == List<Atom>``() = basic_check (List(Atom)) == "List<Atom>"
 
 
 let fact = Let(["fact"], [Fun("n", 
@@ -43,4 +45,4 @@ let fact = Let(["fact"], [Fun("n",
                Type_E(PolyType("fact")))
 
 [<Test>]
-let ``Factorial Definition``() = type_check fact == "(Atom -> Atom)"
+let ``factorial == (Atom -> Atom)``() = typecheck fact == "(Atom -> Atom)"

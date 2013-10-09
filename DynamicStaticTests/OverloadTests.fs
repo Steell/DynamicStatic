@@ -1,7 +1,9 @@
-﻿module OverloadTests
+﻿module DynamicStatic.Tests.OverloadTests
 
 open NUnit.Framework
-open DynamicStatic
+open DynamicStatic.DS
+open DynamicStatic.Type
+open DynamicStatic.TypeExpression
 open TestUtils
 
 let typecheck = type_check >> type2str
@@ -10,17 +12,35 @@ let notExpr = Fun("x", If(Type_E(PolyType("x")), Type_E(False), Type_E(True)))
 let notType = Func(Set.ofList [True, False; False, True])
 
 [<Test>]
-let ``Not Definition``() = type_check notExpr == notType
+let ``not == ((True -> False) + (False -> True))``() = type_check notExpr == notType
 
 [<Test>]
-let ``Call Not: 1 Overload Match``() =
+let ``(not True) == False and (not False) == True``() =
     typecheck (Call(Type_E(notType), Type_E(True))) == "False";
     typecheck (Call(Type_E(notType), Type_E(False))) == "True";
 
 [<Test>]
-let ``Call Not: 2 Overload Match``() =
+let ``(not {True|False}) == {True|False}``() =
     typecheck (Call(Type_E(notType), Type_E(Union(Set.ofList [True; False])))) == "{True|False}"
 
+
+let overloadedType = Func(Set.ofList [True, Atom; False, Atom; Atom, Atom])
+
+[<Test>]
+let ``Arbitrary Overload Call: 1 Match``() =
+    typecheck (Call(Type_E(overloadedType), Type_E(True))) == "Atom";
+    typecheck (Call(Type_E(overloadedType), Type_E(False))) == "Atom";
+    typecheck (Call(Type_E(overloadedType), Type_E(Atom))) == "Atom";
+
+[<Test>]
+let ``Arbitrary Overload Call: 2 Match``() =
+    typecheck (Call(Type_E(overloadedType), Type_E(Union(Set.ofList [True; False])))) == "Atom";
+    typecheck (Call(Type_E(overloadedType), Type_E(Union(Set.ofList [True; Atom])))) == "Atom";
+    typecheck (Call(Type_E(overloadedType), Type_E(Union(Set.ofList [False; Atom])))) == "Atom";
+
+[<Test>]
+let ``Arbitrary Overload Call: 3 Match``() =
+    typecheck (Call(Type_E(overloadedType), Type_E(Union(Set.ofList [True; False; Atom])))) == "Atom";
 
 
 (*  ;; filter :: A B -> Z
@@ -55,5 +75,6 @@ let filter =
         Type_E(PolyType("filter")))
 
 [<Test>]
-let ``Filter Definition``() = 
-    typecheck filter == "(List<{'a|'b}> -> ((('a -> True)+('b -> False)) -> List<'a>))"
+let ``filter == (List<{'a|'b}> -> ((('a -> True)+('b -> False)) -> List<'a>))``() = 
+    let t = typecheck filter
+    t == "(List<{'a|'b}> -> ((('a -> True)+('b -> False)) -> List<'a>))"

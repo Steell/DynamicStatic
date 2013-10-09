@@ -9,8 +9,15 @@ let inline (<!>) (actual:#obj) expected = Assert.IsNotInstanceOf(expected, actua
 
 let ``is null`` anObject = Assert.IsNull(anObject)
 let ``is not null`` anObject = Assert.NotNull(anObject)
+
 let ``fails with`` (message : string) f = 
     Assert.Throws(
         Is.TypeOf<System.Exception>().And.Message.EqualTo(message), 
+        f >> ignore)
+    |> ignore
+
+let fails f =
+    Assert.Throws(
+        Is.TypeOf<System.Exception>(),
         f >> ignore)
     |> ignore

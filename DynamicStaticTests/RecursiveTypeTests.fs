@@ -1,7 +1,9 @@
-﻿module RecursiveTypeTests
+﻿module DynamicStatic.Tests.RecursiveTypeTests
 
 open NUnit.Framework
-open DynamicStatic
+open DynamicStatic.DS
+open DynamicStatic.Type
+open DynamicStatic.TypeExpression
 open TestUtils
 
 let typecheck = type_check >> type2str
@@ -16,7 +18,7 @@ let typecheck = type_check >> type2str
 let omega = Fun("x", Call(Type_E(PolyType("x")), Type_E(PolyType("x"))))
 
 [<Test>]
-let ``Omega Definition``() = typecheck omega == "'a where 'a = ('a -> 'b)"
+let ``omega == 'a where 'a = ('a -> 'b)``() = typecheck omega == "'a where 'a = ('a -> 'b)"
 
 
 (*  ;; Y :: A -> Z
@@ -37,7 +39,7 @@ let yComb = Fun("f",
                                        Type_E(PolyType("v"))))))))
 
 [<Test; Timeout(2000)>]
-let ``Y Combinator Definition``() = typecheck yComb == "((('a -> 'b) -> ('a -> 'b)) -> ('a -> 'b))"
+let ``Y == ((('a -> 'b) -> ('a -> 'b)) -> ('a -> 'b))``() = typecheck yComb == "((('a -> 'b) -> ('a -> 'b)) -> ('a -> 'b))"
 
 
 let factY =
@@ -49,7 +51,7 @@ let factY =
                     Call(Type_E(PolyType("fact")), Call(Call(Type_E(Func(Set.ofList [Atom, Func(Set.ofList [Atom, Atom])])), Type_E(PolyType("n"))), Type_E(Atom)))))))
 
 [<Test; Timeout(2000)>]
-let ``Y Combinator Factorial Application``() = typecheck factY == "(Atom -> Atom)"
+let ``(Y fact/Y) == (Atom -> Atom)``() = typecheck factY == "(Atom -> Atom)"
 
 
 (*  ;; flatten :: A -> Z

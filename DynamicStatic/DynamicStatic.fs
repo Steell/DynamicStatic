@@ -1,392 +1,24 @@
-﻿module DynamicStatic
+﻿module DynamicStatic.DS
+
+open DynamicStatic.ControlFlowTree
+open DynamicStatic.Type
+open DynamicStatic.ConstraintSet
+open DynamicStatic.TypeExpression
+open DynamicStatic.ControlTypeExpression
 
 let guess_maker() =
     let rec numbers_from n =
         seq { yield n; yield! numbers_from (n+1) }
     seq { for n in numbers_from 0 -> sprintf "_%i_temp_" n }
 
-let guesses = guess_maker().GetEnumerator()
+let mutable private guesses = guess_maker().GetEnumerator()
 let fresh_var() =
     ignore <| guesses.MoveNext();
     guesses.Current
 
-
-type Type =
-    | Any
-    | Atom 
-    | Unit
-    | True | False 
-    | TypeId of string   // only used in CFT and CSet
-    | PolyType of string // one can map to several TypeIds, each in a different execution path
-    | List of Type
-    | Func of Set<Overload>
-    | Union of Set<Type>
-
-and Overload = Type * Type
-       
-let type2str t =
-    let rec infinite_letters =
-        let a2z = "abcdefghijklmnopqrstuvwxyz"
-        seq { yield! a2z; yield! infinite_letters }
-    let letters = infinite_letters.GetEnumerator()
-    let fresh_letter() =
-        ignore <| letters.MoveNext();
-        letters.Current
-    let lookup = ref Map.empty
-    let rec type2str = function
-        | Any -> "Any"
-        | Atom -> "Atom"
-        | Unit -> "IO"
-        | True -> "True"
-        | False -> "False"
-        | TypeId(id) -> 
-            match Map.tryFind id !lookup with
-            | Some(id') -> sprintf "'%c" id'
-            | None ->
-                let new_var = fresh_letter()
-                lookup := Map.add id new_var !lookup;
-                sprintf "'%c" new_var
-        | PolyType(id) -> sprintf "Poly(%s)" id
-        | List(t) -> sprintf "List<%s>" <| type2str t
-        | Func(os) when os.Count = 1 -> overload2str os.MinimumElement
-        | Func(os) -> sprintf "(%s)" <| String.concat "+" (Seq.map overload2str os)
-        | Union(ts) -> sprintf "{%s}" <| String.concat "|" (Seq.map type2str ts)
-
-    and overload2str (ps, r) = 
-        sprintf "(%s -> %s)" (type2str ps) (type2str r)
-    
-    type2str t
-
-let rec type_2_str t =
-    let overload2str (ps, r) = 
-        sprintf "(%s -> %s)" (type_2_str ps) (type_2_str r)
-    match t with
-    | Any -> "Any"
-    | Atom -> "Atom"
-    | Unit -> "IO"
-    | True -> "True"
-    | False -> "False"
-    | TypeId(id) -> id
-    | PolyType(id) -> sprintf "Poly(%s)" id
-    | List(t) -> sprintf "List<%s>" <| type_2_str t
-    | Func(os) when os.Count = 1 -> overload2str os.MinimumElement
-    | Func(os) -> sprintf "(%s)" <| String.concat "+" (Seq.map overload2str os)
-    | Union(ts) -> sprintf "{%s}" <| String.concat "|" (Seq.map type_2_str ts)
-
-type Constraint = string * Type
-
-let cset2str cs =
-    String.concat "\n" <| Seq.map (fun (id, rule) -> sprintf "%-10s := %s" id <| type_2_str rule) cs
-
-let constraint_is_reflexive (id, rule) =
-    match rule with
-    | TypeId(id') when id = id' -> true
-    | _ -> false
-
-let cset_add constrnt cset =
-    if constraint_is_reflexive constrnt then
-        cset
-    else
-        Set.add constrnt cset
-
-let cmap_add id rule cmap =
-    if constraint_is_reflexive (id, rule) then
-        cmap
-    else
-        Map.add id rule cmap
-
-let rec union sub super =
-    let rec all_union super = function
-        | sub::ts -> union sub super && all_union super ts
-        | [] -> true
-    let rec unions_with_any sub = function
-        | super::ts -> union sub super || unions_with_any sub ts
-        | [] -> false
-    match sub, super with
-    | _, Any | Func(_), Atom -> true
-
-    | PolyType(id), _ | _, PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
-
-    | TypeId(id), _          -> false
-    | _,          TypeId(id) -> true
-
-    | List(sub'), List(super') -> union sub' super'
-    
-    //A|B := A|B|C
-    | Union(subs), _             -> all_union super <| Set.toList subs
-    | _,           Union(supers) -> unions_with_any sub <| Set.toList supers
-    
-    | Func(sub_os'), Func(super_os') -> 
-        // Unification successful if everything in super_os' unifies with something in sub_os'
-        let rec any_union super' = function
-            | sub'::os -> union_overload sub' super' || any_union super' os
-            | [] -> false
-        let rec unions_with_all sub_os'' = function
-            | super'::os -> any_union super' sub_os'' && unions_with_all sub_os'' os
-            | [] -> true
-        unions_with_all (Set.toList sub_os') (Set.toList super_os')
-    
-    | sub', super' when sub' = super' -> true
-    | _,    _                         -> false
-
-and union_overload (sub_arg, sub_return) (super_arg, super_return) =
-    union super_arg sub_arg && union sub_return super_return
-
-let rec uset_add t uset = 
-    
-    let rec add set t = function
-        | t'::ts -> 
-            match t, t' with
-            | Func(os1), Func(os2) -> 
-                let t'' = Func(Set.foldBack oset_add os1 os2)
-                Set.union set <| Set.ofList (t''::ts)
-            | _ ->
-                if union t' t then
-                    Set.union set <| Set.ofList (t'::ts)
-                else if union t t' then
-                    add (Set.add t set) t ts
-                else
-                    add (Set.add t' set) t ts
-        | [] -> Set.add t set
-
-    match t with
-    | Union(ts) -> Seq.fold (fun a t -> uset_add t a) uset ts
-    | _ -> add Set.empty t <| Set.toList uset
-
-and oset_add overload oset : Set<Overload> =
-    
-    let combine_overloads o1 o2 =
-        let sub_param, sub_return = o1
-        let super_param, super_return = o2
-        let make_union t1 t2 = make_union [t1; t2]
-        if sub_param = super_param then
-             // if returns are functions make sure they are combined into a single overloaded function
-            Some(sub_param, make_union sub_return super_return)
-        (*else if sub_return = super_return then
-            Some(make_union sub_param super_param, sub_return)*)
-        else if union_overload o1 o2 then
-            Some(o1)
-        else if union_overload o2 o1 then
-            Some(o2)
-        else
-            None
-
-    let rec add set o = function
-        | o' :: os ->
-            match combine_overloads o o' with
-            | Some(o'') -> Set.add o'' set
-            | None -> add (Set.add o' set) o os
-        | [] -> Set.add o set
-
-    match overload with
-    | Union(uset), rtn ->
-        let os = Set.map (fun t -> t, rtn) uset
-        Set.foldBack oset_add os oset
-    | _ ->
-        add Set.empty overload <| Set.toList oset
-
-and make_union types =
-    let uset = List.foldBack uset_add types Set.empty
-    if uset.Count = 1 then
-        uset.MinimumElement
-    else
-        Union(uset)
-
-
-type ControlFlowTree = 
-    | Leaf of Map<string, string> 
-    | Branch of ControlFlowTree list
-
-let rec cft_add (id : string) = function
-    | Leaf(map) -> Leaf(Map.add id (fresh_var()) map)
-    | Branch(trees) -> Branch(List.map (cft_add id) trees)
-
-let cft_add_branch (to_add : ControlFlowTree) = function
-    | Leaf(_) -> 0, Branch([to_add])
-    | Branch(trees) -> trees.Length, Branch(trees@[to_add])
-
-let cft_branch idx = function
-    | Leaf(_) -> failwith "Can't get a branch from a leaf."
-    | Branch(trees) -> trees.Item idx
-
-let empty_cft = Leaf(Map.empty)
-
-let cft_map_lookup map =
-    let rec lookup = function
-        | PolyType(id) -> 
-            match Map.tryFind id map with
-            | Some(id') -> Some(TypeId(id'))
-            | None -> None
-        | List(t) -> 
-            match lookup t with
-            | Some(t') -> Some(List(t'))
-            | None -> None
-        | Func(os) ->
-            let overload_lookup (parameter, return_type) = function
-                | Some(os) -> 
-                    match lookup parameter with
-                    | Some(ps) ->
-                        match lookup return_type with
-                        | Some(r) -> Some((*oset_add*)Set.add (ps, r) os)
-                        | None -> None
-                    | None -> None
-                | None -> None               
-            match Set.foldBack overload_lookup os <| Some(Set.empty) with
-            | Some(os) -> Some(Func(os))
-            | None -> None
-        | Union(ts) ->
-            match lookup_all <| Set.toList ts with
-            | Some(ts') -> Some(Union(Set.ofList ts'))
-            | None -> None
-        | x -> Some(x)
-    and lookup_all ts =
-        List.foldBack 
-            (fun t -> function 
-                | Some(ts) -> 
-                    match lookup t with
-                    | Some(t') -> Some(t'::ts)
-                    | None -> None
-                | None -> None)
-            ts
-            (Some([]))
-    lookup
-
-type ControlTypeExpression = (int * CTE)
-and CTE =
-    | CAtom_E
-    | CType_E of Type
-    | CLet of string list * CTE list * CTE
-    | CFun of string * CTE
-    | CCall of CTE * CTE * string
-    | CIf of CTE * ControlTypeExpression * ControlTypeExpression * string
-    | CBegin of CTE list
-
-///AST for FScheme expressions
-type TypeExpression =
-    | Atom_E
-    | Type_E of Type
-    | Let of string list * TypeExpression list * TypeExpression
-    | Fun of string * TypeExpression
-    | Call of TypeExpression * TypeExpression
-    | If of TypeExpression * TypeExpression * TypeExpression
-    | Begin of TypeExpression list
-    
-type UnificationResult =
-    | Success of Set<Constraint>
-    | Failure of Type * Type
-
-let generalize_rule cset id t =
-    let rec generalize_type cset = function
-        | PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
-
-        | TypeId(id') ->
-            let id'' = fresh_var()
-            let t' = TypeId(id'')
-            t', cset_add (id', t') cset
-
-        | List(t) ->
-            let t', cset' = generalize_type cset t
-            List(t'), cset'
-
-        | Union(ts) ->
-            let union_folder (ts', cset') t =
-                let t', cset'' = generalize_type cset' t
-                uset_add t' ts', cset''
-            let ts', cset' = Set.fold union_folder (Set.empty, cset) ts
-            if ts'.Count = 1 then
-                ts'.MinimumElement, cset'
-            else
-                Union(ts'), cset'
-
-        | Func(os) ->
-            let overload_folder (os', cset') (param_type, return_type) =
-                let param_type', cset'' = generalize_type cset' param_type
-                let return_type', cset''' = generalize_type cset'' return_type
-                Set.add (param_type', return_type) os', cset'''
-            let os', cset' = Set.fold overload_folder (Set.empty, cset) os
-            Func(os'), cset'
-
-        | t -> t, cset
-
-    let t', cset' = generalize_type cset t
-    Success(cset_add (id, t') cset')
-
-let rec unify generalize (sub : Type) (super : Type) (cset: Set<Constraint>) : UnificationResult = 
-    let rec all_unify cset' super = function
-        | sub::ts -> 
-            match unify generalize sub super cset' with
-            | Success(cset'') -> all_unify cset'' super ts
-            | failure -> Some(failure), cset'
-        | [] -> None, cset'
-    let rec unifies_with_any cset' sub = function
-        | super::ts ->
-            match unify generalize sub super cset' with
-            | Success(_) as s -> Some(s)
-            | Failure(_, _) -> unifies_with_any cset' sub ts
-        | [] -> None
-    match sub, super with
-    | PolyType(id), _ | _, PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
-
-    //don't add reflexive rules
-    | TypeId(id1), TypeId(id2) when id1 = id2 -> Success(cset)
-    
-    | TypeId(id), _          -> Success(cset_add (id, super) cset)
-    | _,          TypeId(id) -> (*Success(cset_add (id, sub) cset)*)generalize cset id sub
-
-    | _, Any | Func(_), Atom -> Success(cset)
-
-    | List(sub'), List(super') -> unify generalize sub' super' cset
-    
-    | Union(subs), _ -> 
-        match all_unify  cset super <| Set.toList subs with 
-        | Some(failure), _ -> failure 
-        | None, cset'      -> Success(cset')
-
-    | _, Union(supers) -> 
-        match unifies_with_any cset sub <| Set.toList supers with
-        | Some(success) -> success
-        | None          -> Failure(sub, super)
-    
-    | Func(sub_os'), Func(super_os') -> 
-        // Unification successful if everything in super_os' unifies with something in sub_os'
-        let unify_overload (sub_arg, sub_return) (super_arg, super_return) cset' =
-            match unify generalize super_arg sub_arg cset' with
-            | Success(cset'') ->
-                match unify generalize sub_return super_return cset'' with
-                | Success(cset''') -> Some(cset''')
-                | _ -> None
-            | _ -> None
-        ///all super overloads are satisfied by some sub overload?
-        let rec unify_subs_against_supers cset' sub_os'' (super_os'' : Set<Type * Type>) =
-            match sub_os'' with
-            | sub'::os when super_os''.Count > 0 ->
-                ///collect all super overloads that the sub overload unifies with
-                let rec unify_with_all unified_supers = function
-                    | super'::os ->
-                        match unify_overload sub' super' Set.empty with
-                        | Some(_) -> unify_with_all (Set.add super' unified_supers) os
-                        | None -> unify_with_all unified_supers os
-                    | [] ->
-                        let super' =
-                            Set.fold 
-                                (fun (arg, rtn) (arg', rtn') -> make_union [arg; arg'], make_union [rtn; rtn']) 
-                                (Union(Set.empty), Union(Set.empty))
-                                unified_supers
-                        match unify_overload sub' super' cset' with
-                        | Some(cset'') -> cset'', unified_supers
-                        | None -> cset', Set.empty
-                let cset'', unified = unify_with_all Set.empty <| Set.toList super_os''
-                let remaining_supers = Set.difference super_os'' unified
-                unify_subs_against_supers cset'' os remaining_supers
-            | _ -> Success(cset')
-        unify_subs_against_supers cset (Set.toList sub_os') super_os'
-    
-    | sub', super' when sub' = super' -> Success(cset)
-    | _,    _                         -> Failure(sub, super)
-
-let build_cft (expr : TypeExpression) : ControlFlowTree * CTE =
-    let cft_add_stack cft stack = List.foldBack cft_add stack cft
-    let rec build_cft (expr : TypeExpression) (cft : ControlFlowTree) (stack : string list) : (CTE * ControlFlowTree * string list) =
+let build_cft (expr : TypeExpression) : ControlFlowTree * ControlTypeExpression =
+    let cft_add_stack cft stack = List.foldBack (cft_add fresh_var) stack cft
+    let rec build_cft (expr : TypeExpression) (cft : ControlFlowTree) (stack : string list) : (ControlTypeExpression * ControlFlowTree * string list) =
         let rec build_exprs cft' stack' a = function
             | expr::exprs ->
                 let cte, cft'', stack'' = build_cft expr cft' stack'
@@ -451,7 +83,7 @@ let rec constrain (cft : ControlFlowTree) (cset : Set<Constraint>) (sub_type : T
         | Some(cft_subtype) ->
             match cft_map_lookup map super_type with
             | Some(cft_supertype) ->
-                unify generalize_rule cft_subtype cft_supertype cset'
+                unify (generalize_rule fresh_var) cft_subtype cft_supertype cset'
             | None -> Failure(sub_type, super_type) // Maybe we should
         | None -> Failure(sub_type, super_type)     // succeed here?
     match cft with
@@ -477,7 +109,7 @@ let overload_function cft ((param_name : string), (body_type : Type)) : Type =
             List.fold define_in_leaves os trees
     Func(define_in_leaves Set.empty cft)
 
-let rec build_cset ((expr : CTE), (cft : ControlFlowTree)) (cset : Set<Constraint>) : (Type * Set<Constraint>) =
+let rec build_cset ((expr : ControlTypeExpression), (cft : ControlFlowTree)) (cset : Set<Constraint>) : (Type * Set<Constraint>) =
     let rec build_exprs cft' cset' a = function
         | expr::exprs ->
             let cte, cset'' = build_cset (expr, cft') cset'
@@ -801,6 +433,7 @@ let cft2str cft =
     cft2str cft
 
 let type_check expr =
+    guesses <- guess_maker().GetEnumerator();
     let (cft, cte) = build_cft expr
     let cft_str = cft2str cft
     let t, cset = build_cset (cte, cft) Set.empty

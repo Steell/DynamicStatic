@@ -1,10 +1,12 @@
-﻿module PolymorphismTests
+﻿module DynamicStatic.Tests.PolymorphismTests
 
 open NUnit.Framework
-open DynamicStatic
+open DynamicStatic.DS
+open DynamicStatic.Type
+open DynamicStatic.TypeExpression
 open TestUtils
 
-let type_check = type_check >> type2str
+let typecheck = type_check >> type2str
 
 
 let map = Let(["map"], [Fun("l",
@@ -23,31 +25,30 @@ let map = Let(["map"], [Fun("l",
              Type_E(PolyType("map")))
 
 [<Test>]
-let ``Map Definition``() = type_check map == "List<'a> -> (('a -> 'b) -> List<'b>))"
+let ``map == (List<'a> -> (('a -> 'b) -> List<'b>))``() = typecheck map == "(List<'a> -> (('a -> 'b) -> List<'b>))"
 
 
 let id = Fun("x", Type_E(PolyType("x")))
 
 [<Test>]
-let ``Identity Definition``() = type_check id == "('a -> 'a)"
-
+let ``id == ('a -> 'a)``() = typecheck id == "('a -> 'a)"
 
 let id_call arg = Call(id, Type_E(arg))
 
 [<Test>]
-let ``Call Identity With Atom``() = type_check (id_call Atom) == "Atom"
+let ``(id Atom) == Atom``() = typecheck (id_call Atom) == "Atom"
 
 [<Test>]
-let ``Call Identity With Any``() = type_check (id_call Any) == "Any"
+let ``(id Any) == Any``() = typecheck (id_call Any) == "Any"
 
 [<Test>]
-let ``Call Identity With Union``() = type_check (id_call <| Union(Set.ofList [True; False])) == "{True|False}"
+let ``(id {True|False}) == {True|False}``() = typecheck (id_call <| Union(Set.ofList [True; False])) == "{True|False}"
 
 [<Test>]
-let ``Call Identity With Itself``() = type_check (Call(id, Fun("y", Type_E(PolyType("y"))))) == "('a -> 'a)"
+let ``(id id) == id``() = typecheck (Call(id, Fun("y", Type_E(PolyType("y"))))) == "('a -> 'a)"
 
 [<Test>]
-let ``Call Identity With List``() = type_check (id_call <| List(Atom)) == "List<Atom>"
+let ``(id List<Atom>) == List<Atom>``() = typecheck (id_call <| List(Atom)) == "List<Atom>"
 
 [<Test>]
-let ``Call Identity With Polymorphic Type``() = type_check (id_call <| PolyType("a")) == "'a"
+let ``(id 'a) == 'a``() = typecheck (id_call <| PolyType("a")) == "'a"

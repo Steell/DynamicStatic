@@ -47,6 +47,11 @@
     <Reference Include="System.Numerics" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Type.fs" />
+    <Compile Include="ControlFlowTree.fs" />
+    <Compile Include="ConstraintSet.fs" />
+    <Compile Include="ControlTypeExpression.fs" />
+    <Compile Include="TypeExpression.fs" />
     <Compile Include="DynamicStatic.fs" />
   </ItemGroup>
   <PropertyGroup>
