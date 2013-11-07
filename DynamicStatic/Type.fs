@@ -171,7 +171,3 @@ and make_union types =
         uset.MinimumElement
     else
         Union(uset)
-
-[<Test>]
-let ``union set test``() =
-    0
