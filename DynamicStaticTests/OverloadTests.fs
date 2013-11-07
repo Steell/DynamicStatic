@@ -45,6 +45,15 @@ let ``Arbitrary Overload Call: 3 Match``() =
 
 
 [<Test>]
+let ``Wrapped Overload``() =
+    let overloadedFunction =
+        Fun("x", If(Call(Type_E(Func(Set.ofList [List(PolyType("A")), True; Atom, False])),
+                         Type_E(PolyType("x"))),
+                    Type_E(Atom),
+                    Type_E(List(Atom))))
+    typecheck overloadedFunction == "((List<'a> -> Atom)+(Atom -> List<Atom>))"
+
+[<Test>]
 let ``Overload Definition: ((List<'a> -> Atom) -> (Atom -> List<Atom>))``() =
     let overloadedFunction =
         Fun("x", If(Call(Type_E(Func(Set.ofList [List(PolyType("A")), True; Not(List(PolyType("A"))), False])),
@@ -52,7 +61,7 @@ let ``Overload Definition: ((List<'a> -> Atom) -> (Atom -> List<Atom>))``() =
                     Type_E(Atom),
                     Call(Type_E(Func(Set.ofList [Atom, List(Atom)])),
                          Type_E(PolyType("x")))))
-    typecheck overloadedFunction == "((List<'a> -> Atom) -> (Atom -> List<Atom>))"
+    typecheck overloadedFunction == "((List<'a> -> Atom)+(Atom -> List<Atom>))"
 
 
 
