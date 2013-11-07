@@ -44,7 +44,6 @@
     <Reference Include="System.Numerics" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="TestUtils.fs" />
     <Compile Include="BasicTests.fs" />
     <Compile Include="PolymorphismTests.fs" />
     <Compile Include="OverloadTests.fs" />
@@ -54,6 +53,11 @@
     <ProjectReference Include="..\DynamicStatic\DynamicStatic.fsproj">
       <Name>DynamicStatic</Name>
       <Project>{1401f71b-5e9b-4dfa-b1e1-d9e6a9958998}</Project>
+      <Private>True</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\NUnitExtensionsForFSharp\NUnitExtensionsForFSharp.fsproj">
+      <Name>NUnitExtensionsForFSharp</Name>
+      <Project>{efc9fc25-8331-4d3d-8279-d8082d0b1478}</Project>
       <Private>True</Private>
     </ProjectReference>
   </ItemGroup>

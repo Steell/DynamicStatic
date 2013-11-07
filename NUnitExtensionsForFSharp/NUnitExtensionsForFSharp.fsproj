@@ -5,12 +5,12 @@
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <SchemaVersion>2.0</SchemaVersion>
-    <ProjectGuid>1401f71b-5e9b-4dfa-b1e1-d9e6a9958998</ProjectGuid>
+    <ProjectGuid>efc9fc25-8331-4d3d-8279-d8082d0b1478</ProjectGuid>
     <OutputType>Library</OutputType>
-    <RootNamespace>DynamicStatic</RootNamespace>
-    <AssemblyName>DynamicStatic</AssemblyName>
+    <RootNamespace>NUnitExtensionsForFSharp</RootNamespace>
+    <AssemblyName>NUnitExtensionsForFSharp</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
-    <Name>DynamicStatic</Name>
+    <Name>NUnitExtensionsForFSharp</Name>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -20,10 +20,7 @@
     <OutputPath>bin\Debug\</OutputPath>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <WarningLevel>3</WarningLevel>
-    <DocumentationFile>bin\Debug\DynamicStatic.XML</DocumentationFile>
-    <StartAction>Program</StartAction>
-    <StartProgram>C:\Program Files (x86)\Microsoft F#\v4.0\Fsi.exe</StartProgram>
-    <StartArguments>-r "DynamicStatic.dll"</StartArguments>
+    <DocumentationFile>bin\Debug\NUnitExtensionsForFSharp.XML</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -32,10 +29,7 @@
     <OutputPath>bin\Release\</OutputPath>
     <DefineConstants>TRACE</DefineConstants>
     <WarningLevel>3</WarningLevel>
-    <DocumentationFile>bin\Release\DynamicStatic.XML</DocumentationFile>
-    <StartAction>Program</StartAction>
-    <StartProgram>C:\Program Files (x86)\Microsoft F#\v4.0\Fsi.exe</StartProgram>
-    <StartArguments>-r "DynamicStatic.dll"</StartArguments>
+    <DocumentationFile>bin\Release\NUnitExtensionsForFSharp.XML</DocumentationFile>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="mscorlib" />
@@ -50,19 +44,7 @@
     <Reference Include="System.Numerics" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Type.fs" />
-    <Compile Include="ControlFlowTree.fs" />
-    <Compile Include="ConstraintSet.fs" />
-    <Compile Include="ControlTypeExpression.fs" />
-    <Compile Include="TypeExpression.fs" />
-    <Compile Include="DynamicStatic.fs" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\NUnitExtensionsForFSharp\NUnitExtensionsForFSharp.fsproj">
-      <Name>NUnitExtensionsForFSharp</Name>
-      <Project>{efc9fc25-8331-4d3d-8279-d8082d0b1478}</Project>
-      <Private>True</Private>
-    </ProjectReference>
+    <Compile Include="TestUtils.fs" />
   </ItemGroup>
   <PropertyGroup>
     <MinimumVisualStudioVersion Condition="'$(MinimumVisualStudioVersion)' == ''">11</MinimumVisualStudioVersion>

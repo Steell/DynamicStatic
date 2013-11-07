@@ -1,10 +1,11 @@
 ﻿module DynamicStatic.Tests.OverloadTests
 
 open NUnit.Framework
+open NUnit.FSharp.TestUtils
+
 open DynamicStatic.DS
 open DynamicStatic.Type
 open DynamicStatic.TypeExpression
-open TestUtils
 
 let typecheck = type_check >> type2str
 
@@ -59,19 +60,18 @@ let filter =
     Let(["filter"], 
         [Fun("l", Fun("p", If(Call(Type_E(Func(Set.ofList [List(PolyType("A")), Union(Set.ofList [True; False])])), Type_E(PolyType("l"))), 
                               Type_E(PolyType("M")), 
-                              Let(["x"], [Call(Type_E(Func(Set.ofList [List(PolyType("B")), PolyType("B")])), 
-                                               Type_E(PolyType("l")))], 
+                              Let(["x"; "r"], [Call(Type_E(Func(Set.ofList [List(PolyType("B")), PolyType("B")])), 
+                                                    Type_E(PolyType("l")));
+                                               Call(Call(Type_E(PolyType("filter")), 
+                                                         Call(Type_E(Func(Set.ofList [List(PolyType("L")), List(PolyType("L"))])), 
+                                                              Type_E(PolyType("l")))),
+                                                    Type_E(PolyType("p")))], 
                                 If(Call(Type_E(PolyType("p")), 
                                         Type_E(PolyType("x"))), 
                                     Call(Call(Type_E(Func(Set.ofList [PolyType("C"), Func(Set.ofList [List(PolyType("D")), List(Union(Set.ofList [PolyType("C"); PolyType("D")]))])])), 
                                               Type_E(PolyType("x"))),
-                                        Call(Call(Type_E(PolyType("filter")), 
-                                                  Call(Type_E(Func(Set.ofList [List(PolyType("K")), List(PolyType("K"))])),Type_E(PolyType("l")))), 
-                                             Type_E(PolyType("p")))),
-                                    Call(Call(Type_E(PolyType("filter")), 
-                                              Call(Type_E(Func(Set.ofList [List(PolyType("L")), List(PolyType("L"))])), 
-                                                   Type_E(PolyType("l")))),
-                                         Type_E(PolyType("p"))))))))], 
+                                        Type_E(PolyType("r"))),
+                                    Type_E(PolyType("r")))))))], 
         Type_E(PolyType("filter")))
 
 [<Test>]

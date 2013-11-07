@@ -1,10 +1,11 @@
 ﻿module DynamicStatic.Tests.RecursiveTypeTests
 
 open NUnit.Framework
+open NUnit.FSharp.TestUtils
+
 open DynamicStatic.DS
 open DynamicStatic.Type
 open DynamicStatic.TypeExpression
-open TestUtils
 
 let typecheck = type_check >> type2str
 

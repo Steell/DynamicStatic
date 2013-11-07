@@ -1,5 +1,10 @@
 ﻿module DynamicStatic.Type
 
+#nowarn "40"
+
+open NUnit.Framework
+open NUnit.FSharp.TestUtils
+
 type Type =
     | Any
     | Atom 
@@ -162,3 +167,6 @@ and make_union types =
     else
         Union(uset)
 
+[<Test>]
+let ``union set test``() =
+    0
