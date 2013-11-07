@@ -33,6 +33,10 @@ let cft_map_lookup map =
             match lookup t with
             | Some(t') -> Some(List(t'))
             | None -> None
+        | Not(t) ->
+            match lookup t with
+            | Some(t') -> Some(Not(t'))
+            | None -> None
         | Func(os) ->
             let overload_lookup (parameter, return_type) = function
                 | Some(os) -> 
