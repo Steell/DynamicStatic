@@ -31,7 +31,7 @@ let build_cft (expr : TypeExpression) : ControlFlowTree * ControlTypeExpression 
             let rec gather_ids stack = function 
                 | TypeId(id) -> failwith <| sprintf "Not allowed to use TypeId(%s) in TypeExpression" id
                 | PolyType(id) -> id::stack
-                | List(t) -> gather_ids stack t
+                | Not(t) | List(t) -> gather_ids stack t
                 | Func(overloads) -> 
                     Set.fold (fun stack' (param_type, return_type) -> gather_ids (gather_ids stack' param_type) return_type) 
                               stack 
@@ -296,11 +296,11 @@ let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
 let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
     
     let rec contains_vars = function
-        | TypeId(id') -> Map.containsKey id' cset
-        | List(t)     -> contains_vars t
-        | Func(os)    -> Set.exists (fun (pt, ot) -> contains_vars pt || contains_vars ot) os
-        | Union(ts)   -> Set.exists contains_vars ts
-        | _           -> false
+        | TypeId(id')      -> Map.containsKey id' cset
+        | List(t) | Not(t) -> contains_vars t
+        | Func(os)         -> Set.exists (fun (pt, ot) -> contains_vars pt || contains_vars ot) os
+        | Union(ts)        -> Set.exists contains_vars ts
+        | _                -> false
     
     let rec folder lookup to_fold =
     
@@ -309,6 +309,10 @@ let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
             | List(t) ->
                 match fold_constraint lookup t with
                 | Some(t') -> Some(List(t'))
+                | None -> None
+            | Not(t) ->
+                match fold_constraint lookup t with
+                | Some(t') -> Some(Not(t'))
                 | None -> None
             | Func(os) ->
                 let rec fold_os folded os' = function
@@ -406,6 +410,7 @@ let rec collapse_cft (cft : ControlFlowTree) (cmap : Map<string, Type>) (t : Typ
     match t with
     | PolyType(id) -> cft_lookup id cft
     | List(t') -> List(collapse_cft cft cmap t')
+    | Not(t') -> Not(collapse_cft cft cmap t')
     | Union(uset) -> make_union <| Seq.toList (Seq.map (fun t -> collapse_cft cft cmap t) uset)
 
     | Func(oset) ->

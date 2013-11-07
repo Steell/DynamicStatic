@@ -10,6 +10,7 @@ type Type =
     | List of Type
     | Func of OverloadSet
     | Union of UnionSet
+    | Not of Type
 
 and OverloadSet = Set<Type * Type>
 and UnionSet = Set<Type>
@@ -41,6 +42,7 @@ let type2str t =
         | Func(os) when os.Count = 1 -> overload2str os.MinimumElement
         | Func(os) -> sprintf "(%s)" <| String.concat "+" (Seq.map overload2str os)
         | Union(ts) -> sprintf "{%s}" <| String.concat "|" (Seq.map type2str ts)
+        | Not(t) -> sprintf "Not<%s>" <| type2str t
 
     and overload2str (ps, r) = 
         sprintf "(%s -> %s)" (type2str ps) (type2str r)
@@ -62,6 +64,7 @@ let rec type_2_str t =
     | Func(os) when os.Count = 1 -> overload2str os.MinimumElement
     | Func(os) -> sprintf "(%s)" <| String.concat "+" (Seq.map overload2str os)
     | Union(ts) -> sprintf "{%s}" <| String.concat "|" (Seq.map type_2_str ts)
+    | Not(t) -> sprintf "Not<%s>" <| type_2_str t
 
 
 let rec union sub super =
@@ -79,7 +82,9 @@ let rec union sub super =
     | TypeId(id), _          -> false
     | _,          TypeId(id) -> true
 
-    | List(sub'), List(super') -> union sub' super'
+    | Not(sub'), Not(super') | List(sub'), List(super') -> union sub' super'
+
+    | sub', Not(super') | Not(sub'), super' -> not <| union sub' super'
     
     //A|B := A|B|C
     | Union(subs), _             -> all_union super <| Set.toList subs

@@ -43,6 +43,10 @@ let generalize_rule fresh_var cset id t =
             let t', cset' = generalize_type cset t
             List(t'), cset'
 
+        | Not(t) ->
+            let t', cset'  = generalize_type cset t
+            Not(t'), cset'
+
         | Union(ts) ->
             let union_folder (ts', cset') t =
                 let t', cset'' = generalize_type cset' t
@@ -89,6 +93,13 @@ let rec unify generalize (sub : Type) (super : Type) (cset: ConstraintSet) : Uni
     | _,          TypeId(id) -> (*Success(cset_add (id, sub) cset)*)generalize cset id sub
 
     | _, Any | Func(_), Atom -> Success(cset)
+
+    | Not(sub'), Not(super') -> unify generalize sub' super' cset
+
+    | Not(sub'), super'  | sub', Not(super') ->
+        match unify generalize sub' super' cset with
+        | Success(_)    -> Failure(sub', super')
+        | Failure(_, _) -> Success(cset)
 
     | List(sub'), List(super') -> unify generalize sub' super' cset
     
