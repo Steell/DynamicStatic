@@ -16,8 +16,11 @@ let notType = Func(Set.ofList [True, False; False, True])
 let ``not == ((True -> False) + (False -> True))``() = type_check notExpr == notType
 
 [<Test>]
-let ``(not True) == False and (not False) == True``() =
+let ``(not True) == False``() =
     typecheck (Call(Type_E(notType), Type_E(True))) == "False";
+
+[<Test>]
+let `` (not False) == True``() =
     typecheck (Call(Type_E(notType), Type_E(False))) == "True";
 
 [<Test>]
@@ -51,14 +54,14 @@ let ``Wrapped Overload``() =
                          Type_E(PolyType("x"))),
                     Type_E(Atom),
                     Type_E(List(Atom))))
-    typecheck overloadedFunction == "((List<'a> -> Atom)+(Atom -> List<Atom>))"
+    typecheck overloadedFunction == "((Atom -> List<Atom>)+(List<'a> -> Atom))"
 
 [<Test>]
 let ``Overload Definition: ((List<'a> -> Atom) -> (Atom -> List<Atom>))``() =
     let overloadedFunction =
         Fun("x", If(Call(Type_E(Func(Set.ofList [List(PolyType("A")), True; Not(List(PolyType("A"))), False])),
                          Type_E(PolyType("x"))),
-                    Type_E(Atom),
+                    Atom_E,
                     Call(Type_E(Func(Set.ofList [Atom, List(Atom)])),
                          Type_E(PolyType("x")))))
     typecheck overloadedFunction == "((List<'a> -> Atom)+(Atom -> List<Atom>))"
