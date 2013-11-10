@@ -13,7 +13,7 @@ let notExpr = Fun("x", If(Type_E(PolyType("x")), Type_E(False), Type_E(True)))
 let notType = Func(Set.ofList [True, False; False, True])
 
 [<Test>]
-let ``not == ((True -> False) + (False -> True))``() = type_check notExpr == notType
+let ``not == ((True -> False) + (False -> True))``() = typecheck notExpr == type2str notType
 
 [<Test>]
 let ``(not True) == False``() =
