@@ -6,20 +6,25 @@ open DynamicStatic.ConstraintSet
 open DynamicStatic.TypeExpression
 open DynamicStatic.ControlTypeExpression
 
+
 let guess_maker() =
     let rec numbers_from n =
         seq { yield n; yield! numbers_from (n+1) }
     seq { for n in numbers_from 0 -> sprintf "_%i_temp_" n }
+
 
 let mutable private guesses = guess_maker().GetEnumerator()
 let fresh_var() =
     ignore <| guesses.MoveNext();
     guesses.Current
 
+
 let build_cft (id : string) 
               (expr : TypeExpression) 
               : ControlFlowTree * ControlTypeExpression =
+
     let cft_add_stack cft stack = List.foldBack (cft_add fresh_var) stack cft
+
     let rec build_cft (expr : TypeExpression) (cft : ControlFlowTree) (stack : string list) : (ControlTypeExpression * ControlFlowTree * string list) =
         let rec build_exprs cft' stack' a = function
             | expr::exprs ->
@@ -81,11 +86,13 @@ let build_cft (id : string)
     let cte, cft, stack = build_cft expr empty_cft [id]
     cft_add_stack cft stack, cte
 
+
 let rec constrain (cft : ControlFlowTree) 
                   (cset : ConstraintSet) 
                   (sub_type : Type) 
                   (super_type : Type) 
                   : UnificationResult =
+
     let unify' map cset' =
         match cft_map_lookup map sub_type with
         | Some(cft_subtype) ->
@@ -94,6 +101,7 @@ let rec constrain (cft : ControlFlowTree)
                 unify (generalize_rule fresh_var) cft_subtype cft_supertype cset'
             | None -> Failure(sub_type, super_type) // Maybe we should
         | None -> Failure(sub_type, super_type)     // succeed here?
+
     match cft with
     | Leaf(map) -> unify' map cset
     | Branch(trees) -> 
@@ -104,6 +112,7 @@ let rec constrain (cft : ControlFlowTree)
                 | x -> x
             | [] -> Success(cset')
         unify_in_all cset trees
+
 
 let overload_function cft ((param_name : string), (body_type : Type)) : Type =
     let rec define_in_leaves os = function
@@ -116,6 +125,7 @@ let overload_function cft ((param_name : string), (body_type : Type)) : Type =
         | Branch(trees) ->
             List.fold define_in_leaves os trees
     Func(define_in_leaves Set.empty cft)
+
 
 type ConstructionResult =
     | Pass of Type * ConstraintSet
@@ -378,6 +388,7 @@ let rec collapse_cft (cft : ControlFlowTree) (cmap : Map<string, Type>) (t : Typ
     
     | x -> x
 
+
 let cft2str cft =
     let i = ref -1
     let rec cft2str = function
@@ -386,6 +397,7 @@ let cft2str cft =
             String.concat "\n" <| Seq.map (fun (p_id, t_id) -> sprintf "%s = %s[%d]" t_id p_id !i) (Map.toSeq map)
         | Branch(trees) -> String.concat "\n\n====================\n\n" <| List.map cft2str trees
     cft2str cft
+
 
 let type_check expr =
     guesses <- guess_maker().GetEnumerator();
