@@ -87,7 +87,7 @@ let rec unify generalize (sub : Type)
                 | _ -> None
             | _ -> None
         ///all super overloads are satisfied by some sub overload?
-        let rec unify_subs_against_supers cset' sub_os'' (super_os'' : Set<Type * Type>) =
+        let rec unify_subs_against_supers sub_os'' (super_os'' : Set<Type * Type>) o_csets =
             match sub_os'' with
             | sub'::os when super_os''.Count > 0 ->
                 ///collect all super overloads that the sub overload unifies with
@@ -102,14 +102,25 @@ let rec unify generalize (sub : Type)
                                 (fun (arg, rtn) (arg', rtn') -> make_union [arg; arg'], make_union [rtn; rtn']) 
                                 (Union(Set.empty), Union(Set.empty))
                                 unified_supers
-                        match unify_overload sub' super' cset' with
-                        | Some(cset'') -> cset'', unified_supers
-                        | None -> cset', Set.empty
-                let cset'', unified = unify_with_all Set.empty <| Set.toList super_os''
+                        match unify_overload sub' super' cset with
+                        | Some(cset') -> cset', unified_supers
+                        | None -> cset, Set.empty
+                
+                let cset', unified = unify_with_all Set.empty <| Set.toList super_os''
                 let remaining_supers = Set.difference super_os'' unified
-                unify_subs_against_supers cset'' os remaining_supers
-            | _ -> Success(cset')
-        unify_subs_against_supers cset (Set.toList sub_os') super_os'
+                
+                unify_subs_against_supers os remaining_supers (cset'::o_csets)
+            | _ -> 
+                let merge_types (cset' : ConstraintSet) id t =
+                    match Map.tryFind id cset' with
+                    | Some(t') ->  Map.add id (make_union [t'; t]) cset'
+                    | None -> Map.add id t cset'
+    
+                let cset' = List.fold (Map.fold merge_types) Map.empty o_csets
+
+                Success(cset')
+
+        unify_subs_against_supers (Set.toList sub_os') super_os' []
     
     | sub', super' when sub' = super' -> Success(cset)
     | _,    _                         -> Failure(sub, super)
