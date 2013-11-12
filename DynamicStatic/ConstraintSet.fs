@@ -185,17 +185,19 @@ and generalize_rule fresh_var (cset : ConstraintSet) id t =
     | None -> Failure(PolyType(id), t)
 
 and merge_types (cset' : ConstraintSet) id t =
+    let unify' = unify <| fun cset'' id t -> Failure(TypeId(id), t) //Success(cset_add (id, t) cset'')
     let merge_types' t1 t2 =
-        let unify' = unify <| fun cset'' id t -> Failure(TypeId(id), t) //Success(cset_add (id, t) cset'')
-        let merge_types' t1 t2 =
-            match unify' t1 t2 cset' with
-            | Failure(_, _) -> unify' t2 t1 cset'
-            | s -> s
-        match (t1, t2) with
-        | TypeId(id1), TypeId(id2) when id1 <> id2 -> merge_types cset' id2 t1
-        | _, TypeId(_) -> merge_types' t2 t1
-        | _            -> merge_types' t1 t2
+        match unify' t1 t2 cset' with
+        | Failure(_, _) -> 
+            match unify' t2 t1 cset' with
+            | Success(cset'') -> Success(Map.add id t2 cset'')
+            | x -> x
+        | Success(cset'') -> Success(Map.add id t1 cset'')
     match Map.tryFind id cset' with
-    | Some(t') -> merge_types' t' t
+    | Some(t') ->  
+        match (t', t) with
+        | TypeId(id1), TypeId(id2) when id1 <> id2 -> merge_types cset' id2 t'
+        | _, TypeId(_) -> merge_types' t t'
+        | _            -> merge_types' t' t
     | None -> Success(Map.add id t cset')
     

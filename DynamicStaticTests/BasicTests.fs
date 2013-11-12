@@ -47,3 +47,16 @@ let fact = Let(["fact"], [Fun("n",
 
 [<Test>]
 let ``factorial == (Atom -> Atom)``() = typecheck fact == "(Atom -> Atom)"
+
+[<Test>]
+let ``((Not<List<'a>> -> Unit) Atom)``() =
+    let call = Call(Type_E(Func(Set.ofList [Not(List(Atom)), Unit])), Type_E(Atom))
+    typecheck call == "IO"
+
+
+[<Test>]
+let ``x == Atom in: (begin ((Not<List<'a>> -> Unit) x) ((Atom -> Unit) x) x)``() =
+    let call = Begin([Call(Type_E(Func(Set.ofList [Not(List(Atom)), Unit])), Type_E(PolyType("x"))); 
+                      Call(Type_E(Func(Set.ofList [Atom, Unit])), Type_E(PolyType("x")));
+                      Type_E(PolyType("x"))])
+    typecheck call == "Atom"

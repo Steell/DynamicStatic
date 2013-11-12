@@ -64,7 +64,7 @@ let ``Overload Definition: ((List<'a> -> Atom) -> (Atom -> List<Atom>))``() =
                     Atom_E,
                     Call(Type_E(Func(Set.ofList [Atom, List(Atom)])),
                          Type_E(PolyType("x")))))
-    typecheck overloadedFunction == "((List<'a> -> Atom)+(Atom -> List<Atom>))"
+    typecheck overloadedFunction == "((Atom -> List<Atom>)+(List<'a> -> Atom))"
 
 
 
