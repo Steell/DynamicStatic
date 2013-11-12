@@ -53,8 +53,8 @@ let rec unify generalize (sub : Type)
     //don't add reflexive rules
     | TypeId(id1), TypeId(id2) when id1 = id2 -> Success(cset)
     
-    | TypeId(id), _          -> (*Success(cset_add (id, super) cset)*)merge_types cset id super
-    | _,          TypeId(id) -> (*Success(cset_add (id, sub) cset)*)merge_types cset id sub//generalize cset id sub
+    | TypeId(id), _          -> merge_types cset id super
+    | _,          TypeId(id) -> generalize cset id sub
 
     | _, Any | Func(_), Atom -> Success(cset)
 
