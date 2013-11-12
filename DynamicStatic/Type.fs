@@ -165,6 +165,8 @@ and oset_add overload oset : OverloadSet =
     | _ ->
         add Set.empty overload <| Set.toList oset
 
+and make_oset types = List.foldBack oset_add types Set.empty
+
 and make_union types =
     let uset = List.foldBack uset_add types Set.empty
     if uset.Count = 1 then

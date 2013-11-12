@@ -4,21 +4,17 @@ open Type
 
 
 type Constraint = string * Type
-type ConstraintSet = Set<Constraint>
+type ConstraintSet = Map<string, Type>
 
-let cset2str cs =
-    String.concat "\n" <| Seq.map (fun (id, rule) -> sprintf "%-10s := %s" id <| type_2_str rule) cs
+let cset2str (cs : ConstraintSet) =
+    String.concat "\n" (Seq.map (fun (id, rule) -> sprintf "%-10s := %s" id 
+                                                        <| type_2_str rule) 
+                             <| Map.toSeq cs)
 
 let constraint_is_reflexive (id, rule) =
     match rule with
     | TypeId(id') when id = id' -> true
     | _ -> false
-
-let cset_add constrnt cset =
-    if constraint_is_reflexive constrnt then
-        cset
-    else
-        Set.add constrnt cset
 
 let cmap_add id rule cmap =
     if constraint_is_reflexive (id, rule) then
@@ -26,77 +22,45 @@ let cmap_add id rule cmap =
     else
         Map.add id rule cmap
 
+let cset_add (i, c) (cset : ConstraintSet) = cmap_add i c cset
+
 type UnificationResult =
     | Success of ConstraintSet
     | Failure of Type * Type
 
-let generalize_rule fresh_var cset id t =
-    let rec generalize_type cset = function
-        | PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
-
-        | TypeId(id') ->
-            let id'' = fresh_var()
-            let t' = TypeId(id'')
-            t', cset_add (id', t') cset
-
-        | List(t) ->
-            let t', cset' = generalize_type cset t
-            List(t'), cset'
-
-        | Not(t) ->
-            let t', cset'  = generalize_type cset t
-            Not(t'), cset'
-
-        | Union(ts) ->
-            let union_folder (ts', cset') t =
-                let t', cset'' = generalize_type cset' t
-                uset_add t' ts', cset''
-            let ts', cset' = Set.fold union_folder (Set.empty, cset) ts
-            if ts'.Count = 1 then
-                ts'.MinimumElement, cset'
-            else
-                Union(ts'), cset'
-
-        | Func(os) ->
-            let overload_folder (os', cset') (param_type, return_type) =
-                let param_type', cset'' = generalize_type cset' param_type
-                let return_type', cset''' = generalize_type cset'' return_type
-                Set.add (param_type', return_type) os', cset'''
-            let os', cset' = Set.fold overload_folder (Set.empty, cset) os
-            Func(os'), cset'
-
-        | t -> t, cset
-
-    let t', cset' = generalize_type cset t
-    Success(cset_add (id, t') cset')
-
-let rec unify generalize (sub : Type) (super : Type) (cset: ConstraintSet) : UnificationResult = 
+let rec unify generalize (sub : Type) 
+                         (super : Type) 
+                         (cset: ConstraintSet) 
+                         : UnificationResult = 
+    
     let rec all_unify cset' super = function
         | sub::ts -> 
             match unify generalize sub super cset' with
             | Success(cset'') -> all_unify cset'' super ts
             | failure -> Some(failure), cset'
         | [] -> None, cset'
+    
     let rec unifies_with_any cset' sub = function
         | super::ts ->
             match unify generalize sub super cset' with
             | Success(_) as s -> Some(s)
             | Failure(_, _) -> unifies_with_any cset' sub ts
         | [] -> None
+
     match sub, super with
     | PolyType(id), _ | _, PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
 
     //don't add reflexive rules
     | TypeId(id1), TypeId(id2) when id1 = id2 -> Success(cset)
     
-    | TypeId(id), _          -> Success(cset_add (id, super) cset)
-    | _,          TypeId(id) -> (*Success(cset_add (id, sub) cset)*)generalize cset id sub
+    | TypeId(id), _          -> (*Success(cset_add (id, super) cset)*)merge_types cset id super
+    | _,          TypeId(id) -> (*Success(cset_add (id, sub) cset)*)merge_types cset id sub//generalize cset id sub
 
     | _, Any | Func(_), Atom -> Success(cset)
 
-    | Not(sub'), Not(super') -> unify generalize sub' super' cset
+    | Not(sub'), Not(super') -> unify generalize super' sub' cset
 
-    | Not(sub'), super'  | sub', Not(super') ->
+    | sub', Not(super') ->
         match unify generalize sub' super' cset with
         | Success(_)    -> Failure(sub', super')
         | Failure(_, _) -> Success(cset)
@@ -104,7 +68,7 @@ let rec unify generalize (sub : Type) (super : Type) (cset: ConstraintSet) : Uni
     | List(sub'), List(super') -> unify generalize sub' super' cset
     
     | Union(subs), _ -> 
-        match all_unify  cset super <| Set.toList subs with 
+        match all_unify cset super <| Set.toList subs with 
         | Some(failure), _ -> failure 
         | None, cset'      -> Success(cset')
 
@@ -129,7 +93,7 @@ let rec unify generalize (sub : Type) (super : Type) (cset: ConstraintSet) : Uni
                 ///collect all super overloads that the sub overload unifies with
                 let rec unify_with_all unified_supers = function
                     | super'::os ->
-                        match unify_overload sub' super' Set.empty with
+                        match unify_overload sub' super' Map.empty with
                         | Some(_) -> unify_with_all (Set.add super' unified_supers) os
                         | None -> unify_with_all unified_supers os
                     | [] ->
@@ -149,3 +113,78 @@ let rec unify generalize (sub : Type) (super : Type) (cset: ConstraintSet) : Uni
     
     | sub', super' when sub' = super' -> Success(cset)
     | _,    _                         -> Failure(sub, super)
+
+and generalize_rule fresh_var (cset : ConstraintSet) id t =
+    let rec generalize_type cset = function
+        | PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
+
+        | TypeId(id') ->
+            let id'' = fresh_var()
+            let t' = TypeId(id'')
+            match merge_types cset id' t' with
+            | Success(cset') -> Some(t', cset')
+            | _ -> None
+
+        | List(t) ->
+            match generalize_type cset t with
+            | Some(t', cset') -> Some(List(t'), cset')
+            | x -> x
+
+        | Not(t) ->
+            match generalize_type cset t with
+            | Some(t', cset') -> Some(Not(t'), cset')
+            | x -> x
+
+        | Union(ts) ->
+            let union_folder a t =
+                match a with
+                | Some(ts', cset') ->
+                    match generalize_type cset' t with
+                    | Some(t', cset'') -> Some(uset_add t' ts', cset'')
+                    | None             -> None
+                | x -> x
+            match Set.fold union_folder (Some(Set.empty, cset)) ts with
+            | Some(ts', cset') ->
+                if ts'.Count = 1 then
+                    Some(ts'.MinimumElement, cset')
+                else
+                    Some(Union(ts'), cset')
+            | None -> None
+
+        | Func(os) ->
+            let overload_folder a (param_type, return_type) =
+                match a with
+                | Some(os', cset') ->
+                    match generalize_type cset' param_type with
+                    | Some(param_type', cset'') ->
+                        match generalize_type cset'' return_type with
+                        | Some(return_type', cset''') ->
+                            Some(Set.add (param_type', return_type) os', cset''')
+                        | None -> None
+                    | None -> None
+                | None -> None
+            match Set.fold overload_folder (Some(Set.empty, cset)) os with
+            | Some(os', cset') -> Some(Func(os'), cset')
+            | None -> None
+
+        | t -> Some(t, cset)
+
+    match generalize_type cset t with
+    | Some(t', cset') -> merge_types cset' id t'
+    | None -> Failure(PolyType(id), t)
+
+and merge_types (cset' : ConstraintSet) id t =
+    let merge_types' t1 t2 =
+        let unify' = unify <| fun cset'' id t -> Failure(TypeId(id), t) //Success(cset_add (id, t) cset'')
+        let merge_types' t1 t2 =
+            match unify' t1 t2 cset' with
+            | Failure(_, _) -> unify' t2 t1 cset'
+            | s -> s
+        match (t1, t2) with
+        | TypeId(id1), TypeId(id2) when id1 <> id2 -> merge_types cset' id2 t1
+        | _, TypeId(_) -> merge_types' t2 t1
+        | _            -> merge_types' t1 t2
+    match Map.tryFind id cset' with
+    | Some(t') -> merge_types' t' t
+    | None -> Success(Map.add id t cset')
+    

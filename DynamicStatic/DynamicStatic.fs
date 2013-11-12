@@ -16,7 +16,9 @@ let fresh_var() =
     ignore <| guesses.MoveNext();
     guesses.Current
 
-let build_cft (expr : TypeExpression) : ControlFlowTree * ControlTypeExpression =
+let build_cft (id : string) 
+              (expr : TypeExpression) 
+              : ControlFlowTree * ControlTypeExpression =
     let cft_add_stack cft stack = List.foldBack (cft_add fresh_var) stack cft
     let rec build_cft (expr : TypeExpression) (cft : ControlFlowTree) (stack : string list) : (ControlTypeExpression * ControlFlowTree * string list) =
         let rec build_exprs cft' stack' a = function
@@ -33,9 +35,11 @@ let build_cft (expr : TypeExpression) : ControlFlowTree * ControlTypeExpression 
                 | PolyType(id) -> id::stack
                 | Not(t) | List(t) -> gather_ids stack t
                 | Func(overloads) -> 
-                    Set.fold (fun stack' (param_type, return_type) -> gather_ids (gather_ids stack' param_type) return_type) 
-                              stack 
-                              overloads
+                    Set.fold (fun stack' (param_type, return_type) -> 
+                                 gather_ids (gather_ids stack' param_type) 
+                                            return_type)
+                             stack 
+                             overloads
                 | Union(ts) -> Set.fold gather_ids stack ts
                 | _ -> stack
             CType_E(t), cft, gather_ids stack t
@@ -47,7 +51,8 @@ let build_cft (expr : TypeExpression) : ControlFlowTree * ControlTypeExpression 
         
         | Fun(param_name, body_expr) ->
             let c_body, cft', stack' = build_cft body_expr cft <| param_name::stack
-            CFun(param_name, c_body), cft', stack'
+            let id = fresh_var()
+            CFun(param_name, c_body, id), cft', id::stack'
         
         | Call(fun_expr, arg_expr) ->
             let fun_expr', cft', stack' = build_cft fun_expr cft stack
@@ -71,13 +76,16 @@ let build_cft (expr : TypeExpression) : ControlFlowTree * ControlTypeExpression 
             let t_idx, cft'' = cft_add_branch t_cft' cft'
             let f_idx, cft''' = cft_add_branch f_cft' cft''
 
-            let return_id = fresh_var()
-            CIf(c_test, (t_idx, c_t_expr), (f_idx, c_f_expr), return_id),  cft''', return_id::stack'
+            CIf(c_test, (t_idx, c_t_expr), (f_idx, c_f_expr)),  cft''', stack'
 
-    let cte, cft, stack = build_cft expr empty_cft []
+    let cte, cft, stack = build_cft expr empty_cft [id]
     cft_add_stack cft stack, cte
 
-let rec constrain (cft : ControlFlowTree) (cset : Set<Constraint>) (sub_type : Type) (super_type : Type) : UnificationResult =
+let rec constrain (cft : ControlFlowTree) 
+                  (cset : ConstraintSet) 
+                  (sub_type : Type) 
+                  (super_type : Type) 
+                  : UnificationResult =
     let unify' map cset' =
         match cft_map_lookup map sub_type with
         | Some(cft_subtype) ->
@@ -95,7 +103,7 @@ let rec constrain (cft : ControlFlowTree) (cset : Set<Constraint>) (sub_type : T
                 | Success(cset'') -> unify_in_all cset'' trees'
                 | x -> x
             | [] -> Success(cset')
-        unify_in_all cset trees    
+        unify_in_all cset trees
 
 let overload_function cft ((param_name : string), (body_type : Type)) : Type =
     let rec define_in_leaves os = function
@@ -109,188 +117,130 @@ let overload_function cft ((param_name : string), (body_type : Type)) : Type =
             List.fold define_in_leaves os trees
     Func(define_in_leaves Set.empty cft)
 
-let rec build_cset ((expr : ControlTypeExpression), (cft : ControlFlowTree)) (cset : Set<Constraint>) : (Type * Set<Constraint>) =
-    let rec build_exprs cft' cset' a = function
-        | expr::exprs ->
-            let cte, cset'' = build_cset (expr, cft') cset'
-            build_exprs cft' cset'' (cte::a) exprs
-        | [] ->  List.rev a, cset'
+type ConstructionResult =
+    | Pass of Type * ConstraintSet
+    | Fail of Type * Type
+
+let rec build_cset (expected : Type) 
+                   (expr : ControlTypeExpression)
+                   (cft : ControlFlowTree)
+                   (cset : ConstraintSet)
+                   : ConstructionResult =
     match expr with
-    | CAtom_E -> Atom, cset
-    | CType_E(t) -> t, cset
+    | CAtom_E -> build_cset expected (CType_E(Atom)) cft cset
+
+    | CType_E(t) -> 
+        match constrain cft cset t expected with
+        | Success(cset') -> Pass(t, cset')
+        | Failure(t1, t2) -> Fail(t1, t2)
+
     | CLet(ids, exprs, body_expr) ->
-        let expr_types, cset' = build_exprs cft cset [] exprs
         let rec constrain_all cset'' = function
             | (t1, t2)::xs -> 
-                match constrain cft cset'' t1 t2 with
-                | Success(cset''') -> constrain_all cset''' xs
+                match build_cset t1 t2 cft cset'' with
+                | Pass(_, cset''') -> constrain_all cset''' xs
                 | x -> x
-            | [] -> Success(cset'')
-        match constrain_all cset' <| List.zip (List.map PolyType ids) expr_types with
-        | Success(cset'') -> build_cset (body_expr, cft) cset''
-        | Failure(t1, t2) -> failwith "Unification Failure (build_cset.Let)."
-    | CFun(param_name, body_expr) ->
-        let body_type, cset' = build_cset (body_expr, cft) cset
-        Func(Set.ofList [PolyType(param_name), body_type]), cset'
-    | CCall(func_expr, arg_expr, return_id) ->
-        let func_type, cset' = build_cset (func_expr, cft) cset
-        let arg_type, cset'' = build_cset (arg_expr, cft) cset'
+            | [] -> Pass(Any, cset'')
+        match constrain_all cset <| List.zip (List.map PolyType ids) exprs with
+        | Pass(_, cset') -> build_cset expected body_expr cft cset'
+        | x -> x
 
-        (*match func_type with
-        | Func(os) ->
-            let rec constrain_os cset''' rtn_set = function
-                | (arg_type', rtn)::os' ->
-                    match constrain cft cset'' arg_type arg_type' with
-                    | Success(cset'''') -> constrain_os cset'''' (uset_add rtn rtn_set) os'
-                    | _ -> constrain_os cset''' rtn_set os'
-                | [] -> 
-                    if rtn_set.IsEmpty then
-                        failwith "Unification failure (build_cset.Call) Could not constrain function call types."
-                    else if rtn_set.Count = 1 then
-                        rtn_set.MinimumElement, cset'''
-                    else
-                        Union(rtn_set), cset'''
-            constrain_os cset'' Set.empty <| Set.toList os
-                        
-        | _ ->*)
-
-        let func = Func(*oset_add (arg_type, PolyType(return_id)) Set.empty*)(Set.ofList [arg_type, PolyType(return_id)])
-        match constrain cft cset'' func func_type with
-        | Success(cset''') -> PolyType(return_id), cset'''
-        | Failure(t1, t2) -> failwith "Unification failure (build_cset.Call) Could not constrain function call types."
-
+    | CFun(param_name, body_expr, return_id) ->
+        let rtn = PolyType(return_id)
+        match build_cset rtn body_expr cft cset with
+        | Pass(t, cset') ->
+            let f = Func(make_oset [PolyType(param_name), t])
+            match constrain cft cset' f expected with
+            | Success(cset'') -> Pass(f, cset'')
+            | Failure(t1, t2) -> Fail(t1, t2)
+        | x -> x
+        
+    | CCall(func_expr, arg_expr, id) ->
+        let argId = PolyType(id)
+        match build_cset argId arg_expr cft cset with
+        | Pass(t, cset') ->
+            let f = Func(make_oset [t, expected])
+            build_cset f func_expr cft cset'
+        | x -> x
+        
     | CBegin(exprs) ->
         let rec begin_exprs cset' = function
-            | []           -> Unit, cset'
-            | [expr']      -> build_cset (expr', cft) cset'
+            | []           -> Pass(Unit, cset')
+            | [expr']      -> build_cset expected expr' cft cset'
             | expr'::exprs -> 
-                let _, cset'' = build_cset (expr', cft) cset'
-                begin_exprs cset'' exprs
+                match build_cset Any expr' cft cset' with
+                | Pass(_, cset'') -> begin_exprs cset'' exprs
+                | x -> x
         begin_exprs cset exprs
-    | CIf(test, (t_idx, t_expr), (f_idx, f_expr), return_id) ->
-        let test_type, cset = build_cset (test, cft) cset
+
+    | CIf(test, (t_idx, t_expr), (f_idx, f_expr)) ->
         let t_cft = cft_branch t_idx cft
         let f_cft = cft_branch f_idx cft
-
-        // constrain test to True in t_cft
-        match constrain t_cft cset test_type True with
-        | Success(cset) -> 
-            // constrain test to False in f_cft
-            match constrain f_cft cset test_type False with
-            | Success(cset) ->
-                let true_type, cset = build_cset (t_expr, t_cft) cset
-                let false_type, cset = build_cset (f_expr, f_cft) cset
-                // constrain if return to true branch in t_cft
-                match constrain t_cft cset (PolyType(return_id)) true_type with
-                | Success(cset) -> 
-                    // constrain if return to false branch in f_cft
-                    match constrain f_cft cset (PolyType(return_id)) false_type with
-                    | Success(cset) -> PolyType(return_id), cset
-                    | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
-                | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
-            | Failure(t1, t2) ->
-                // constrain test to True|False in f_cft
-                match constrain f_cft cset test_type <| Union(Set.ofList [True; False]) with
-                | Success(cset) ->
-                    let true_type, cset = build_cset (t_expr, t_cft) cset
-                    let false_type, cset = build_cset (f_expr, f_cft) cset
-                    // constrain if return to true branch in t_cft
-                    match constrain t_cft cset (PolyType(return_id)) true_type with
-                    | Success(cset) -> 
-                        // constrain if return to false branch in f_cft
-                        match constrain f_cft cset (PolyType(return_id)) false_type with
-                        | Success(cset) -> PolyType(return_id), cset
-                        | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
-                    | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
-                | Failure(t1, t2) ->
-                    // constrain if return to true branch in cft
-                    let true_type, cset = build_cset (t_expr, t_cft) cset
-                    match constrain cft cset (PolyType(return_id)) true_type with
-                    | Success(cset) -> PolyType(return_id), cset
-                    | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
-        | Failure(t1, t2) ->
-            // constrain test to True|False in t_cft
-            match constrain t_cft cset test_type <| Union(Set.ofList [True; False]) with
-            | Success(cset) ->
-                // constrain test to False in f_cft
-                match constrain f_cft cset test_type False with
-                | Success(cset) ->
-                    let true_type, cset = build_cset (t_expr, t_cft) cset
-                    let false_type, cset = build_cset (f_expr, f_cft) cset
-                    // constrain if return to true branch in t_cft
-                    match constrain t_cft cset (PolyType(return_id)) true_type with
-                    | Success(cset) -> 
-                        // constrain if return to false branch in f_cft
-                        match constrain f_cft cset (PolyType(return_id)) false_type with
-                        | Success(cset) -> PolyType(return_id), cset
-                        | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
-                    | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
-                | Failure(t1, t2) ->
-                    // constrain test to True|False in f_cft
-                    match constrain f_cft cset test_type <| Union(Set.ofList [True; False]) with
-                    | Success(cset) ->
-                        let true_type, cset = build_cset (t_expr, t_cft) cset
-                        let false_type, cset = build_cset (f_expr, f_cft) cset
-                        // constrain if return to true branch in t_cft
-                        match constrain t_cft cset (PolyType(return_id)) true_type with
-                        | Success(cset) -> 
-                            // constrain if return to false branch in f_cft
-                            match constrain f_cft cset (PolyType(return_id)) false_type with
-                            | Success(cset) -> PolyType(return_id), cset
-                            | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
-                        | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
-                    | Failure(t1, t2) ->
-                        // constrain if return to true branch in cft
-                        let true_type, cset = build_cset (t_expr, t_cft) cset
-                        match constrain cft cset (PolyType(return_id)) true_type with
-                        | Success(cset) -> PolyType(return_id), cset
-                        | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) True CFT could not be constrained to if return type"
-            | Failure(t1, t2) ->
-                // constrain test to False in f_cft
-                match constrain f_cft cset test_type False with
-                | Success(cset) ->
-                    // constrain if return to false branch in cft
-                    let false_type, cset = build_cset (f_expr, f_cft) cset
-                    match constrain cft cset (PolyType(return_id)) false_type with
-                    | Success(cset) -> PolyType(return_id), cset
-                    | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
-                | Failure(t1, t2) ->
-                    // constrain test to True|False in f_cft
-                    match constrain f_cft cset test_type <| Union(Set.ofList [True; False]) with
-                    | Success(cset) ->
-                        // constrain if return to false branch in cft
-                        let false_type, cset = build_cset (f_expr, f_cft) cset
-                        match constrain cft cset (PolyType(return_id)) false_type with
-                        | Success(cset) -> PolyType(return_id), cset
-                        | Failure(t1, t2) -> failwith "Unification Failure (build_cset.If) False CFT could not be constrained to if return type"
-                    | Failure(t1, t2) -> failwith "Unification Failure (build_vset.If) Test could not be constrained to True|False"
-
-let merge_duplicate_rules (cset : Set<Constraint>) : Map<string, Type> =
-    let merge_types cset' t1 t2 =
-        let unify' = unify <| fun cset'' id t -> Failure(TypeId(id), t) //Success(cset_add (id, t) cset'')
-        let merge_types' cset' t1 t2 =
-            let cset' = Set.ofList cset'
-            match unify' t1 t2 cset' with
-            | Success(cset'') -> Some(t1, Set.toList cset'')
-            | Failure(_, _) ->
-                match unify' t2 t1 cset' with
-                | Success(cset'') -> Some(t2, Set.toList cset'')
-                | Failure(_, _) -> None
-        match (t1, t2) with
-        | TypeId(id1), TypeId(id2) when id1 <> id2 -> Some(t1, (id2, t1)::cset')
-        | _, TypeId(_) -> merge_types' cset' t2 t1
-        | _            -> merge_types' cset' t1 t2
         
-    let rec merge_all map = function
-        | (id, t)::cset' ->
-            match Map.tryFind id map with
-            | Some(t') ->
-                match merge_types cset' t' t with
-                | Some(t'', cset'') -> merge_all (cmap_add id t'' map) cset''
-                | None -> failwith "Could not merge types."
-            | None -> merge_all (cmap_add id t map) cset'
-        | [] -> map
-    merge_all Map.empty <| Set.toList cset
+        // constrain test to True in t_cft
+        match build_cset True test t_cft cset with
+        | Pass(_, cset) -> 
+            // constrain test to False in f_cft
+            match build_cset False test f_cft cset with
+            | Pass(_, cset) ->
+                // constrain if return to true branch in t_cft
+                match build_cset expected t_expr t_cft cset  with
+                | Pass(_, cset) -> 
+                    // constrain if return to false branch in f_cft
+                    build_cset expected f_expr f_cft cset
+                | x -> x
+            | _ ->
+                // constrain test to True|False in f_cft
+                match build_cset (Union(Set.ofList [True; False])) test f_cft cset with
+                | Pass(_, cset) ->
+                    // constrain if return to true branch in t_cft
+                    match build_cset expected t_expr t_cft cset with
+                    | Pass(_, cset) -> 
+                        // constrain if return to false branch in f_cft
+                        build_cset expected f_expr f_cft cset
+                    | x -> x
+                | _ ->
+                    // constrain if return to true branch in cft
+                    build_cset expected t_expr cft cset
+        | _ ->
+            // constrain test to True|False in t_cft
+            match build_cset (Union(Set.ofList [True; False])) test t_cft cset with
+            | Pass(_, cset) ->
+                // constrain test to False in f_cft
+                match build_cset False test f_cft cset with
+                | Pass(_, cset) ->
+                    // constrain if return to true branch in t_cft
+                    match build_cset expected t_expr t_cft cset with
+                    | Pass(_, cset) -> 
+                        // constrain if return to false branch in f_cft
+                        build_cset expected f_expr f_cft cset
+                    | x -> x
+                | _ ->
+                    // constrain test to True|False in f_cft
+                    match build_cset (Union(Set.ofList [True; False])) test f_cft cset with
+                    | Pass(_, cset) ->
+                        // constrain if return to true branch in t_cft
+                        match build_cset expected t_expr t_cft cset with
+                        | Pass(_, cset) -> 
+                            // constrain if return to false branch in f_cft
+                            build_cset expected f_expr f_cft cset
+                        | x -> x
+                    | _ ->
+                        // constrain if return to true branch in cft
+                        build_cset expected t_expr cft cset
+            | _ ->
+                // constrain test to False in f_cft
+                match build_cset False test f_cft cset with
+                | Pass(_, cset) ->
+                    // constrain if return to false branch in cft
+                    build_cset expected f_expr cft cset
+                | _ ->
+                    // constrain test to True|False in f_cft
+                    match build_cset (Union(Set.ofList [True; False])) f_expr f_cft cset with
+                    | Pass(_, cset) ->
+                        // constrain if return to false branch in cft
+                        build_cset expected f_expr cft cset
+                    | x -> x
 
 
 let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
@@ -439,16 +389,20 @@ let cft2str cft =
 
 let type_check expr =
     guesses <- guess_maker().GetEnumerator();
-    let (cft, cte) = build_cft expr
+    let result_id = fresh_var()
+    let (cft, cte) = build_cft result_id expr
     let cft_str = cft2str cft
-    let t, cset = build_cset (cte, cft) Set.empty
-    let set_str = cset2str cset
-    //printfn "%s" set_str;
-    let merged_map = merge_duplicate_rules cset
-    let set_str' = cset2str <| Map.toSeq merged_map
-    let unfolded_map = constrain_undefined_ids cft merged_map
-    let set_set'' = cset2str <| Map.toSeq unfolded_map
-    let diff = cset2str (Map.toSeq <| Map.filter (fun id _ -> not <| Map.containsKey id merged_map) unfolded_map)
-    let map = fold_type_constants unfolded_map
-    let set_str''' = cset2str <| Map.toSeq map
-    collapse_cft cft map t
+    let t = PolyType(result_id)
+    match build_cset t cte cft Map.empty with
+    | Pass(t', cset) ->
+        let set_str = cset2str cset
+        //printfn "%s" set_str;
+        let merged_map = cset //merge_duplicate_rules cset
+        //let set_str' = cset2str merged_map
+        let unfolded_map = constrain_undefined_ids cft merged_map
+        let set_set'' = cset2str unfolded_map
+        let diff = cset2str <| Map.filter (fun id _ -> not <| Map.containsKey id merged_map) unfolded_map
+        let map = fold_type_constants unfolded_map
+        let set_str''' = cset2str map
+        collapse_cft cft map t
+    | Fail(t1, t2) -> failwith <| sprintf "Unification Error: %s %s" (type2str t1) (type2str t2)
