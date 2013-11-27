@@ -10,23 +10,80 @@ open DynamicStatic.TypeExpression
 let typecheck = type_check >> type2str
 
 
-let map = Let(["map"], [Fun("l",
-                            Fun("f",
-                                If(Call(Type_E(Func(Set.ofList [List(PolyType("A")), Union(Set.ofList [True; False])])),
-                                        Type_E(PolyType("l"))),
-                                   Type_E(List(PolyType("B"))),
-                                   Call(Call(Type_E(Func(Set.ofList [PolyType("C"), Func(Set.ofList [List(PolyType("D")), List(Union(Set.ofList [PolyType("C"); PolyType("D")]))])])), 
-                                             Call(Type_E(PolyType("f")),
-                                                  Call(Type_E(Func(Set.ofList [List(PolyType("E")), PolyType("E")])), 
-                                                       Type_E(PolyType("l"))))),
+let empty = Type_E(PolyType("empty"))
+
+let isEmpty = Type_E(Func(Set.ofList [List(PolyType("empty?A")), Bool]))
+
+
+// cons :: A -> List<B> -> List<{A|B}>
+let cons = Type_E(Func(Set.ofList [PolyType("consA"), 
+                                   Func(Set.ofList [List(PolyType("consB")), 
+                                                    List(Union(Set.ofList [PolyType("consA"); PolyType("consB")]))])]))
+
+[<Test>]
+let ``(cons Atom List<Atom>) == List<Atom>``() =
+    let call = Call(Call(cons, Atom_E), Type_E(List(Atom)))
+    typecheck call == "List<Atom>"
+
+[<Test>]
+let ``(cons Atom List<True>) == List<{Atom|True}>``() =
+    let call = Call(Call(cons, Atom_E), Type_E(List(True)))
+    typecheck call == "List<{Atom|True}>"
+
+[<Test>]
+let ``(cons Atom empty) == List<Atom>``() =
+    let call = Call(Call(cons, Atom_E), empty)
+    typecheck call == "List<Atom>"
+
+
+let first = Type_E(Func(Set.ofList [List(PolyType("firstA")), PolyType("firstA")]))
+
+[<Test>]
+let ``(first List<Atom>) == Atom``() =
+    let call = Call(first, Type_E(List(Atom)))
+    typecheck call == "Atom"
+
+[<Test>]
+let ``(first List<A>) == A``() =
+    let call = Call(first, Type_E(PolyType("A")))
+    typecheck call == "'a"
+
+
+let rest = Type_E(Func(Set.ofList [List(PolyType("restA")), List(PolyType("restA"))]))
+
+[<Test>]
+let ``(rest List<Atom>) == List<Atom>``() =
+    let call = Call(rest, Type_E(List(Atom)))
+    typecheck call == "List<Atom>"
+    
+[<Test>]
+let ``(rest List<A>) == List<A>``() =
+    let call = Call(rest, Type_E(PolyType("A")))
+    typecheck call == "List<'a>"
+
+
+(*
+    ;; map :: List<A> -> (A -> B) -> List<B>
+    (define (map l f)
+        (if (empty? l)
+            empty
+            (cons (f (first l)) (map (rest l) f))))
+*)
+let map = Let(["map"], [Fun("mapl",
+                            Fun("mapf",
+                                If(Call(isEmpty, Type_E(PolyType("mapl"))),
+                                   empty,
+                                   Call(Call(cons, Call(Type_E(PolyType("mapf")), 
+                                                        Call(first, Type_E(PolyType("mapl"))))),
                                         Call(Call(Type_E(PolyType("map")),
-                                                  Call(Type_E(Func(Set.ofList [List(PolyType("F")), List(PolyType("F"))])),
-                                                       Type_E(PolyType("l")))), 
-                                             Type_E(PolyType("f")))))))],
+                                                  Call(rest, Type_E(PolyType("mapl")))), 
+                                             Type_E(PolyType("mapf")))))))],
              Type_E(PolyType("map")))
 
 [<Test>]
-let ``map == (List<'a> -> (('a -> 'b) -> List<'b>))``() = typecheck map == "(List<'a> -> (('a -> 'b) -> List<'b>))"
+let ``map == (List<'a> -> (('a -> 'b) -> List<'b>))``() = 
+    let maptype = typecheck map
+    maptype == "(List<'a> -> (('a -> 'b) -> List<'b>))"
 
 
 let id = Fun("x", Type_E(PolyType("x")))
@@ -43,10 +100,12 @@ let ``(id Atom) == Atom``() = typecheck (id_call Atom) == "Atom"
 let ``(id Any) == Any``() = typecheck (id_call Any) == "Any"
 
 [<Test>]
-let ``(id {True|False}) == {True|False}``() = typecheck (id_call <| Union(Set.ofList [True; False])) == "{True|False}"
+let ``(id {True|False}) == {True|False}``() = 
+    typecheck (id_call <| Union(Set.ofList [True; False])) == "{True|False}"
 
 [<Test>]
-let ``(id id) == id``() = typecheck (Call(id, Fun("y", Type_E(PolyType("y"))))) == "('a -> 'a)"
+let ``(id id) == id``() = 
+    typecheck (Call(id, Fun("y", Type_E(PolyType("y"))))) == "('a -> 'a)"
 
 [<Test>]
 let ``(id List<Atom>) == List<Atom>``() = typecheck (id_call <| List(Atom)) == "List<Atom>"

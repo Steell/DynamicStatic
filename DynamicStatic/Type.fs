@@ -19,6 +19,8 @@ type Type =
 
 and OverloadSet = Set<Type * Type>
 and UnionSet = Set<Type>
+
+let Bool = Union(Set.ofList [True; False])
        
 let type2str t =
     let rec infinite_letters =
