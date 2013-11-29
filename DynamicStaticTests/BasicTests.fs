@@ -60,3 +60,29 @@ let ``x == Atom in: (begin ((Not<List<'a>> -> Unit) x) ((Atom -> Unit) x) x)``()
                       Call(Type_E(Func(Set.ofList [Atom, Unit])), Type_E(PolyType("x")));
                       Type_E(PolyType("x"))])
     typecheck call == "Atom"
+
+
+[<Test>]
+let ``make_union [Atom; Atom] == Atom``() =
+    make_union [Atom; Atom] == Atom
+
+[<Test>]
+let ``make_union ['a; 'b] == {'a|'b}``() =
+    let letters = ["A"; "B"]
+    let poly_sets = List.map PolyType letters
+    make_union poly_sets == Union(Set.ofList poly_sets)
+
+    let id_sets = List.map TypeId letters
+    make_union id_sets == Union(Set.ofList id_sets)
+
+
+let compose = Fun("f", 
+                  Fun("g", 
+                      Fun("x", 
+                          Call(Type_E(PolyType("g")), 
+                               Call(Type_E(PolyType("f")), Type_E(PolyType("x")))))))
+
+[<Test>]
+let ``compose == (('a -> 'b) -> (('b -> 'c) -> ('a -> 'c)))``() =
+    let result = typecheck compose
+    result == "(('a -> 'b) -> (('b -> 'c) -> ('a -> 'c)))"

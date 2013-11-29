@@ -54,7 +54,7 @@ let rec unify generalize (sub : Type)
     | TypeId(id1), TypeId(id2) when id1 = id2 -> Success(cset)
     
     | TypeId(id), _          -> merge_types cset id super
-    | _,          TypeId(id) -> merge_types cset id sub //generalize cset id sub
+    | _,          TypeId(id) -> generalize cset id sub
 
     | _, Any | Func(_), Atom -> Success(cset)
 
@@ -188,11 +188,11 @@ and merge_types (cset' : ConstraintSet) id t =
     let unify' = unify <| fun cset'' id t -> Failure(TypeId(id), t) //Success(cset_add (id, t) cset'')
     let merge_types' t1 t2 =
         match unify' t1 t2 cset' with
+        | Success(cset'') -> Success(Map.add id t1 cset'')
         | Failure(_, _) -> 
             match unify' t2 t1 cset' with
             | Success(cset'') -> Success(Map.add id t2 cset'')
-            | x -> x
-        | Success(cset'') -> Success(Map.add id t1 cset'')
+            | _ -> Failure(t1, t2)
     match Map.tryFind id cset' with
     | Some(t') ->  
         match (t', t) with

@@ -83,11 +83,15 @@ let rec union sub super =
         | [] -> false
     match sub, super with
     | _, Any | Func(_), Atom -> true
+    
+    | TypeId(id1), TypeId(id2)
+    | PolyType(id1), PolyType(id2) -> id1 = id2
 
-    | PolyType(id), _ | _, PolyType(id) -> failwith "Illegal PolyType(%s) found in constraint set." id
+    | PolyType(_), _           -> false
+    | _,           PolyType(_) -> true
 
-    | TypeId(id), _          -> false
-    | _,          TypeId(id) -> true
+    | TypeId(_), _          -> false
+    | _,         TypeId(id) -> true
 
     | Not(sub'), Not(super') | List(sub'), List(super') -> union sub' super'
 

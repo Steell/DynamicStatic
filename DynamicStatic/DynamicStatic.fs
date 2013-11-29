@@ -170,7 +170,9 @@ let rec build_cset (expected : Type)
         match build_cset argId arg_expr cft cset with
         | Pass(t, cset') ->
             let f = Func(make_oset [t, expected])
-            build_cset f func_expr cft cset'
+            match build_cset f func_expr cft cset' with
+            | Pass(_, cset'') -> Pass(expected, cset'')
+            | x -> x
         | x -> x
         
     | CBegin(exprs) ->
@@ -195,10 +197,11 @@ let rec build_cset (expected : Type)
             | Pass(_, cset) ->
                 // constrain if return to true branch in t_cft
                 match build_cset expected t_expr t_cft cset  with
-                | Pass(_, cset) -> 
+                | Pass(true_type, cset) -> 
                     // constrain if return to false branch in f_cft
                     match build_cset expected f_expr f_cft cset with
-                    | Pass(_, cset) -> Pass(expected, cset)
+                    | Pass(false_type, cset) -> 
+                        Pass(expected, cset)
                     | x -> x
                 | x -> x
             | _ ->
@@ -207,16 +210,17 @@ let rec build_cset (expected : Type)
                 | Pass(_, cset) ->
                     // constrain if return to true branch in t_cft
                     match build_cset expected t_expr t_cft cset with
-                    | Pass(_, cset) -> 
+                    | Pass(true_type, cset) -> 
                         // constrain if return to false branch in f_cft
                         match build_cset expected f_expr f_cft cset with
-                        | Pass(_, cset) -> Pass(expected, cset)
+                        | Pass(false_type, cset) ->
+                            Pass(make_union [true_type; false_type], cset)
                         | x -> x
                     | x -> x
                 | _ ->
                     // constrain if return to true branch in cft
                     match build_cset expected t_expr cft cset with
-                    | Pass(_, cset) -> Pass(expected, cset)
+                    | Pass(true_type, cset) -> Pass(true_type, cset)
                     | x -> x
         | _ ->
             // constrain test to True|False in t_cft
@@ -227,10 +231,11 @@ let rec build_cset (expected : Type)
                 | Pass(_, cset) ->
                     // constrain if return to true branch in t_cft
                     match build_cset expected t_expr t_cft cset with
-                    | Pass(_, cset) -> 
+                    | Pass(true_type, cset) -> 
                         // constrain if return to false branch in f_cft
                         match build_cset expected f_expr f_cft cset with
-                        | Pass(_, cset) -> Pass(expected, cset)
+                        | Pass(false_type, cset) -> 
+                            Pass(make_union [true_type; false_type], cset)
                         | x -> x
                     | x -> x
                 | _ ->
@@ -239,16 +244,17 @@ let rec build_cset (expected : Type)
                     | Pass(_, cset) ->
                         // constrain if return to true branch in t_cft
                         match build_cset expected t_expr t_cft cset with
-                        | Pass(_, cset) -> 
+                        | Pass(true_type, cset) -> 
                             // constrain if return to false branch in f_cft
                             match build_cset expected f_expr f_cft cset with
-                            | Pass(_, cset) -> Pass(expected, cset)
+                            | Pass(false_type, cset) -> 
+                                Pass(make_union [true_type; false_type], cset)
                             | x -> x
                         | x -> x
                     | _ ->
                         // constrain if return to true branch in cft
                         match build_cset expected t_expr cft cset with
-                        | Pass(_, cset) -> Pass(expected, cset)
+                        | Pass(true_type, cset) -> Pass(true_type, cset)
                         | x -> x
             | _ ->
                 // constrain test to False in f_cft
@@ -256,7 +262,7 @@ let rec build_cset (expected : Type)
                 | Pass(_, cset) ->
                     // constrain if return to false branch in cft
                     match build_cset expected f_expr cft cset with
-                    | Pass(_, cset) -> Pass(expected, cset)
+                    | Pass(false_type, cset) -> Pass(false_type, cset)
                     | x -> x
                 | _ ->
                     // constrain test to True|False in f_cft
@@ -264,7 +270,7 @@ let rec build_cset (expected : Type)
                     | Pass(_, cset) ->
                         // constrain if return to false branch in cft
                         match build_cset expected f_expr cft cset with
-                        | Pass(_, cset) -> Pass(expected, cset)
+                        | Pass(false_type, cset) -> Pass(false_type, cset)
                         | x -> x
                     | x -> x
 
