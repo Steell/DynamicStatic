@@ -206,7 +206,7 @@ let rec build_cset (expected : Type)
                 | x -> x
             | _ ->
                 // constrain test to True|False in f_cft
-                match build_cset (Union(Set.ofList [True; False])) test f_cft cset with
+                match build_cset Bool test f_cft cset with
                 | Pass(_, cset) ->
                     // constrain if return to true branch in t_cft
                     match build_cset expected t_expr t_cft cset with
@@ -224,7 +224,7 @@ let rec build_cset (expected : Type)
                     | x -> x
         | _ ->
             // constrain test to True|False in t_cft
-            match build_cset (Union(Set.ofList [True; False])) test t_cft cset with
+            match build_cset Bool test t_cft cset with
             | Pass(_, cset) ->
                 // constrain test to False in f_cft
                 match build_cset False test f_cft cset with
@@ -240,7 +240,7 @@ let rec build_cset (expected : Type)
                     | x -> x
                 | _ ->
                     // constrain test to True|False in f_cft
-                    match build_cset (Union(Set.ofList [True; False])) test f_cft cset with
+                    match build_cset Bool test f_cft cset with
                     | Pass(_, cset) ->
                         // constrain if return to true branch in t_cft
                         match build_cset expected t_expr t_cft cset with
@@ -266,7 +266,7 @@ let rec build_cset (expected : Type)
                     | x -> x
                 | _ ->
                     // constrain test to True|False in f_cft
-                    match build_cset (Union(Set.ofList [True; False])) f_expr f_cft cset with
+                    match build_cset Bool f_expr f_cft cset with
                     | Pass(_, cset) ->
                         // constrain if return to false branch in cft
                         match build_cset expected f_expr cft cset with
@@ -275,19 +275,32 @@ let rec build_cset (expected : Type)
                     | x -> x
 
 
+///Replaces all instances of type variables with their constraints
 let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
     
-    let rec contains_vars = function
-        | TypeId(id')      -> Map.containsKey id' cset
-        | List(t) | Not(t) -> contains_vars t
-        | Func(os)         -> Set.exists (fun (pt, ot) -> contains_vars pt || contains_vars ot) os
-        | Union(ts)        -> Set.exists contains_vars ts
+    ///Does the given type contain constrained type variables?
+    let rec contains_vars id = function
+        | TypeId(id') when id <> id' -> 
+            match Map.tryFind id' cset with
+            | None -> false
+            | Some(t) -> not <| contains_id id' t
+        | List(t) | Not(t) -> contains_vars id t
+        | Func(os)         -> Set.exists (fun (pt, ot) -> contains_vars id pt || contains_vars id ot) os
+        | Union(ts)        -> Set.exists (contains_vars id) ts
         | _                -> false
     
     let rec folder lookup to_fold =
     
+        ///Given a type and a lookup map, replaces all type variables with value stored in lookup
         let rec fold_constraint lookup = function
-            | TypeId(id) -> Map.tryFind id lookup
+            | TypeId(id) -> 
+                match Map.tryFind id lookup with
+                | Some(t') -> 
+                    if contains_id id t' then 
+                        None 
+                    else 
+                        Some(t')
+                | None -> None
             | List(t) ->
                 match fold_constraint lookup t with
                 | Some(t') -> Some(List(t'))
@@ -307,7 +320,7 @@ let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
                         | None ->
                             match fold_constraint lookup body_type with
                             | Some(t) -> fold_os true (oset_add (param_type, t) os') os''
-                            | None -> fold_os false (oset_add (param_type, body_type) os') os''
+                            | None -> fold_os folded (oset_add (param_type, body_type) os') os''
                     | [] -> if folded then Some(os') else None
                 match fold_os false Set.empty <| Set.toList os with
                 | Some(os') -> Some(Func(os'))
@@ -329,16 +342,15 @@ let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
                 | None     -> fold_all again lookup (cmap_add id t a) cs
             | [] -> 
                 if again then
-                    let to_fold', lookup' = Map.partition (fun _ -> contains_vars) a
-                    let lookup'' = Map.foldBack Map.add lookup' lookup
+                    let to_fold', lookup' = Map.partition contains_vars a
+                    let lookup'' = Map.foldBack Map.add lookup lookup'
                     folder lookup'' <| Map.toList to_fold'
                 else
                     Map.foldBack Map.add a lookup
                         
         fold_all false lookup Map.empty to_fold
 
-    let to_fold, lookup = Map.partition (fun _ -> contains_vars) cset
-    
+    let to_fold, lookup = Map.partition contains_vars cset
     folder lookup <| Map.toList to_fold
 
 

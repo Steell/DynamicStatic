@@ -74,6 +74,15 @@ let rec type_2_str t =
     | Not(t) -> sprintf "Not<%s>" <| type_2_str t
 
 
+let rec contains_id id = function
+    | TypeId(id') -> id = id'
+    | List(t) -> contains_id id t
+    | Func(oset) -> Set.exists (fun (param, rtn) -> contains_id id param || contains_id id rtn) oset
+    | Union(ts) -> Set.exists (contains_id id) ts
+    | Not(t) -> contains_id id t
+    | _ -> false
+
+
 let rec union sub super =
     let rec all_union super = function
         | sub::ts -> union sub super && all_union super ts

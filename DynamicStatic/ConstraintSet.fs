@@ -54,7 +54,7 @@ let rec unify generalize (sub : Type)
     | TypeId(id1), TypeId(id2) when id1 = id2 -> Success(cset)
     
     | TypeId(id), _          -> merge_types cset id super
-    | _,          TypeId(id) -> generalize cset id sub
+    | _,          TypeId(id) -> (*generalize*) merge_types cset id sub
 
     | _, Any | Func(_), Atom -> Success(cset)
 
