@@ -1,5 +1,4 @@
 DynamicStatic
 =============
 
-Type inference prototype, supports Subtypes, Type Unions, Function Overloads, and Recursive Types.
-
+Work in progress type inference prototype. Supports subtypes, type unions, function overloads, and recursive types.
