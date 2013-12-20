@@ -51,12 +51,15 @@ All of the following uses of `filter` correctly resolve:
 
 ## Let-bound polymorphism
 
+Traditional Hindley-Milner cannot resolve f without annotations, despite this being a valid program.
 
 ```scheme
 ((lambda (f) (f "string!") (f 1)) (lambda (x) x))
+```
 
-;; DynamicStatic can resolve the type using an overload:
+DynamicStatic can resolve the type using an overload:
 
+```scheme
 ;; ((String -> Any)+(Integer -> 'b)) -> 'b
 (lambda (f) (f "string!") (f 1))
 ```
