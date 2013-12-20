@@ -49,10 +49,10 @@ All of the following uses of `filter` correctly resolve:
 ```
 
 
-Let-bound polymorphism is no longer an issue:
+## Let-bound polymorphism
+
 
 ```scheme
-;; Traditional Hindley-Milner cannot resolve f without annotations, despite this being a valid program.
 ((lambda (f) (f "string!") (f 1)) (lambda (x) x))
 
 ;; DynamicStatic can resolve the type using an overload:
@@ -61,12 +61,15 @@ Let-bound polymorphism is no longer an issue:
 (lambda (f) (f "string!") (f 1))
 ```
 
+## Not implemented
+
+### Recursive Types
 
 Typing the Y-Combinator using recursive types:
 
 ```scheme
-;; omega :: R 
-;;   where R = ({'a|R} -> 'b)
+;; omega :: (R -> 'b)
+;;   where R = (R -> 'b)
 (define omega (lambda (x) (x x)))
 
 ;; Y :: (('a -> 'b) -> 'a -> 'b) -> 'a -> 'b
@@ -81,4 +84,19 @@ Typing the Y-Combinator using recursive types:
          (if (<= 0 n) 
              1 
              (* n (fact (sub1 n))))))))
+```
+
+Flattening a list:
+
+```scheme
+;; flatten :: (R -> List<Atom>)
+;;    where R = {Atom|List<R>}
+(define flatten
+  (lambda (x)
+    (if (list? x)
+        (if (empty? x)
+            empty
+            (append (flatten (first x))
+                    (flatten (rest x))))
+        (list x))))
 ```
