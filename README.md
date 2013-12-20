@@ -64,7 +64,7 @@ DynamicStatic can resolve the type using an overload:
 (lambda (f) (f "string!") (f 1))
 ```
 
-## Not implemented
+## Future Plans
 
 ### Recursive Types
 
