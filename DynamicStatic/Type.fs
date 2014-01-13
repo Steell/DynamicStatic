@@ -10,8 +10,7 @@ type Type =
     | Atom 
     | Unit
     | True | False 
-    | TypeId of string   // only used in CFT and CSet
-    | PolyType of string // one can map to several TypeIds, each in a different execution path
+    | TypeId of string
     | List of Type
     | Func of OverloadSet
     | Union of UnionSet
@@ -44,7 +43,7 @@ let type2str t =
                 let new_var = fresh_letter()
                 lookup := Map.add id new_var !lookup;
                 sprintf "'%c" new_var
-        | PolyType(id) -> sprintf "Poly(%s)" id
+        //| PolyType(id) -> sprintf "Poly(%s)" id
         | List(t) -> sprintf "List<%s>" <| type2str t
         | Func(os) when os.Count = 1 -> overload2str os.MinimumElement
         | Func(os) -> sprintf "(%s)" <| String.concat "+" (Seq.map overload2str os)
@@ -66,7 +65,7 @@ let rec type_2_str t =
     | True -> "True"
     | False -> "False"
     | TypeId(id) -> id
-    | PolyType(id) -> sprintf "Poly(%s)" id
+    //| PolyType(id) -> sprintf "Poly(%s)" id
     | List(t) -> sprintf "List<%s>" <| type_2_str t
     | Func(os) when os.Count = 1 -> overload2str os.MinimumElement
     | Func(os) -> sprintf "(%s)" <| String.concat "+" (Seq.map overload2str os)
@@ -93,11 +92,11 @@ let rec union sub super =
     match sub, super with
     | _, Any | Func(_), Atom -> true
     
-    | TypeId(id1), TypeId(id2)
-    | PolyType(id1), PolyType(id2) -> id1 = id2
+    //| PolyType(id1), PolyType(id2) 
+    | TypeId(id1), TypeId(id2) -> id1 = id2
 
-    | PolyType(_), _           -> false
-    | _,           PolyType(_) -> true
+    //| PolyType(_), _           -> false
+    //| _,           PolyType(_) -> true
 
     | TypeId(_), _          -> false
     | _,         TypeId(id) -> true

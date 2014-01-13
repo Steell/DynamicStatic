@@ -3,8 +3,7 @@
 open DynamicStatic.ControlFlowTree
 open DynamicStatic.Type
 open DynamicStatic.ConstraintSet
-open DynamicStatic.TypeExpression
-open DynamicStatic.ControlTypeExpression
+open DynamicStatic.Expression
 
 
 let guess_maker() =
@@ -19,261 +18,119 @@ let fresh_var() =
     guesses.Current
 
 
-let build_cft (id : string) 
-              (expr : TypeExpression) 
-              : ControlFlowTree * ControlTypeExpression =
-
-    let cft_add_stack cft stack = List.foldBack (cft_add fresh_var) stack cft
-
-    let rec build_cft (expr : TypeExpression) (cft : ControlFlowTree) (stack : string list) : (ControlTypeExpression * ControlFlowTree * string list) =
-        let rec build_exprs cft' stack' a = function
-            | expr::exprs ->
-                let cte, cft'', stack'' = build_cft expr cft' stack'
-                build_exprs cft'' stack'' (cte::a) exprs
-            | [] ->  List.rev a, cft', stack'
-        match expr with
-        | Atom_E -> CAtom_E, cft, stack
-        
-        | Type_E(t) -> 
-            let rec gather_ids stack = function 
-                | TypeId(id) -> failwith <| sprintf "Not allowed to use TypeId(%s) in TypeExpression" id
-                | PolyType(id) -> id::stack
-                | Not(t) | List(t) -> gather_ids stack t
-                | Func(overloads) -> 
-                    Set.fold (fun stack' (param_type, return_type) -> 
-                                 gather_ids (gather_ids stack' param_type) 
-                                            return_type)
-                             stack 
-                             overloads
-                | Union(ts) -> Set.fold gather_ids stack ts
-                | _ -> stack
-            CType_E(t), cft, gather_ids stack t
-
-        | Let(ids, exprs, body_expr) ->
-            let c_exprs, cft', stack' = build_exprs cft (ids @ stack) [] exprs
-            let c_body, cft'', stack'' = build_cft body_expr cft' stack'
-            CLet(ids, c_exprs, c_body), cft'', stack''
-        
-        | Fun(param_name, body_expr) ->
-            let c_body, cft', stack' = build_cft body_expr cft <| param_name::stack
-            let id = fresh_var()
-            CFun(param_name, c_body, id), cft', id::stack'
-        
-        | Call(fun_expr, arg_expr) ->
-            let fun_expr', cft', stack' = build_cft fun_expr cft stack
-            let arg_expr', cft'', stack'' = build_cft arg_expr cft' stack'
-            let return_id = fresh_var()
-            CCall(fun_expr', arg_expr', return_id), cft'', return_id::stack''
-
-        | Begin(exprs) ->
-            let c_exprs, cft', stack' = build_exprs cft stack [] exprs
-            CBegin(c_exprs), cft', stack'
-
-        | If(test, t_expr, f_expr) ->
-            let c_test, cft', stack' = build_cft test cft stack
-
-            let c_t_expr, t_cft, t_stack = build_cft t_expr cft' []
-            let t_cft' = cft_add_stack t_cft t_stack
-
-            let c_f_expr, f_cft, f_stack = build_cft f_expr cft' []
-            let f_cft' = cft_add_stack f_cft f_stack
-
-            let t_idx, cft'' = cft_add_branch t_cft' cft'
-            let f_idx, cft''' = cft_add_branch f_cft' cft''
-
-            CIf(c_test, (t_idx, c_t_expr), (f_idx, c_f_expr)),  cft''', stack'
-
-    let cte, cft, stack = build_cft expr empty_cft [id]
-    cft_add_stack cft stack, cte
-
-
-let rec constrain (cft : ControlFlowTree) 
-                  (cset : ConstraintSet) 
-                  (sub_type : Type) 
-                  (super_type : Type) 
-                  : UnificationResult =
-
-    let unify' map cset' =
-        match cft_map_lookup map sub_type with
-        | Some(cft_subtype) ->
-            match cft_map_lookup map super_type with
-            | Some(cft_supertype) ->
-                unify (generalize_rule fresh_var) cft_subtype cft_supertype cset'
-            | None -> Failure(sub_type, super_type) // Maybe we should
-        | None -> Failure(sub_type, super_type)     // succeed here?
-
-    match cft with
-    | Leaf(map) -> unify' map cset
-    | Branch(trees) -> 
-        let rec unify_in_all cset' = function
-            | tree::trees' -> 
-                match constrain tree cset' sub_type super_type with
-                | Success(cset'') -> unify_in_all cset'' trees'
-                | x -> x
-            | [] -> Success(cset')
-        unify_in_all cset trees
-
-
-let overload_function cft ((param_name : string), (body_type : Type)) : Type =
-    let rec define_in_leaves os = function
-        | Leaf(map) -> 
-            let lookup t = 
-                match cft_map_lookup map t with
-                | Some(x) -> x
-                | None -> failwith "Overload Failure"
-            Set.add (lookup <| PolyType(param_name), lookup body_type) os
-        | Branch(trees) ->
-            List.fold define_in_leaves os trees
-    Func(define_in_leaves Set.empty cft)
-
-
 type ConstructionResult =
-    | Pass of Type * ConstraintSet
+    | Pass of (Type * ConstraintSet) list
     | Fail of Type * Type
 
 let rec build_cset (expected : Type) 
-                   (expr : ControlTypeExpression)
-                   (cft : ControlFlowTree)
+                   (env : Environment)
                    (cset : ConstraintSet)
+                   (expr : Expression)
                    : ConstructionResult =
-    match expr with
-    | CAtom_E -> build_cset expected (CType_E(Atom)) cft cset
-
-    | CType_E(t) -> 
-        match constrain cft cset t expected with
-        | Success(cset') -> Pass(t, cset')
+    
+    let constrain t =
+        match unify generalize_rule t expected Map.empty with
+        | Success(cset) -> Pass([t, cset])
         | Failure(t1, t2) -> Fail(t1, t2)
+    
+    match expr with
 
-    | CLet(ids, exprs, body_expr) ->
-        let rec constrain_all cset'' = function
-            | (t1, t2)::xs -> 
-                match build_cset t1 t2 cft cset'' with
-                | Pass(_, cset''') -> constrain_all cset''' xs
-                | x -> x
-            | [] -> Pass(Any, cset'')
-        match constrain_all cset <| List.zip (List.map PolyType ids) exprs with
-        | Pass(_, cset') -> build_cset expected body_expr cft cset'
-        | x -> x
+    | Number(_) | String(_) -> constrain Atom
 
-    | CFun(param_name, body_expr, return_id) ->
-        let rtn = PolyType(return_id)
-        match build_cset rtn body_expr cft cset with
-        | Pass(t, cset') ->
-            let f = Func(make_oset [PolyType(param_name), t])
-            match constrain cft cset' f expected with
-            | Success(cset'') -> Pass(f, cset'')
-            | Failure(t1, t2) -> Fail(t1, t2)
+    | Bool(b) -> constrain <| if b then True else False
+
+    | Id(id) -> 
+        match Map.tryFind id env with
+        | Some(t) -> constrain t
+        | None -> failwith "Unbound identifier"
+
+    | Let(id, expr, body_expr) -> build_cset expected env cset <| Call(Fun(id, body_expr), expr) 
+
+    | Fun(param_name, body_expr) ->
+        let param_tvar = TypeId(fresh_var())
+        let rtn_tvar = TypeId(fresh_var())
+        match build_cset rtn_tvar (Map.add param_name param_tvar env) cset body_expr with
+        | Pass(branches) ->
+            // X = lookup param_name in all csets
+            // Y = return type for each branch
+            // (X1 -> Y1, X2 -> Y2, etc.)
+            // constrain that against expected
+            failwith "TODO: build_cset.Fun"
         | x -> x
         
-    | CCall(func_expr, arg_expr, id) ->
-        let argId = PolyType(id)
-        match build_cset argId arg_expr cft cset with
-        | Pass(t, cset') ->
-            let f = Func(make_oset [t, expected])
-            match build_cset f func_expr cft cset' with
-            | Pass(_, cset'') -> Pass(expected, cset'')
-            | x -> x
-        | x -> x
+    | Call(func_expr, arg_expr) ->
         
-    | CBegin(exprs) ->
+        let arg_tvar = TypeId(fresh_var())
+
+        // step 1: build func_expr cset
+        //      expected' = arg_tvar -> expected
+
+        // step 2: for each result of the func building...
+        //      confirm it's either a TypeId or a Func, since those are the only things that are callable
+        //      turn into a single overloaded function
+        //          TypeIds should be replaced with expected'(?)
+
+        // step 3: build arg_expr cset
+        //      expected'' = arg_tvar
+
+        // step 4: 
+        //  for each result of the arg building...
+        //      constrain against all funcs separately
+        //          skip failures
+        //          if there are no successes, then fail
+
+        failwith "TODO: build_cset.Call"
+
+        (*
+        match build_cset arg_tvar env arg_expr with
+        | Pass(branches) ->
+            // merge all branches(?)
+            //   branches = [(X1, cset1); (X2, cset2); ...]
+            //   merged = ({X1|X2|...|Xn}, same for cset rules)
+
+            let func_expected = Func(Set.ofList [ arg_tvar, expected ])
+
+
+        | x -> x
+        *)
+
+    | Begin(exprs) ->
         let rec begin_exprs cset' = function
-            | []           -> Pass(Unit, cset')
-            | [expr']      -> build_cset expected expr' cft cset'
+            | []           -> Pass([ Unit, cset' ])
+            | [expr']      -> build_cset expected env cset' expr'
             | expr'::exprs -> 
-                match build_cset Any expr' cft cset' with
-                | Pass(_, cset'') -> begin_exprs cset'' exprs
+                match build_cset Any env cset' expr' with
+                | Pass(branches) -> 
+                    //TODO: drop return types, merge all branches
+                    let cset'' = failwith "TODO: build_cset.Begin"
+                    begin_exprs cset'' exprs
                 | x -> x
         begin_exprs cset exprs
 
-    | CIf(test, (t_idx, t_expr), (f_idx, f_expr)) ->
-        let t_cft = cft_branch t_idx cft
-        let f_cft = cft_branch f_idx cft
+    | If(test, t_expr, f_expr) ->
         
         // constrain test to True in t_cft
-        match build_cset True test t_cft cset with
-        | Pass(_, cset) -> 
             // constrain test to False in f_cft
-            match build_cset False test f_cft cset with
-            | Pass(_, cset) ->
                 // constrain if return to true branch in t_cft
-                match build_cset expected t_expr t_cft cset  with
-                | Pass(true_type, cset) -> 
                     // constrain if return to false branch in f_cft
-                    match build_cset expected f_expr f_cft cset with
-                    | Pass(false_type, cset) -> 
-                        Pass(expected, cset)
-                    | x -> x
-                | x -> x
-            | _ ->
                 // constrain test to True|False in f_cft
-                match build_cset Bool test f_cft cset with
-                | Pass(_, cset) ->
                     // constrain if return to true branch in t_cft
-                    match build_cset expected t_expr t_cft cset with
-                    | Pass(true_type, cset) -> 
                         // constrain if return to false branch in f_cft
-                        match build_cset expected f_expr f_cft cset with
-                        | Pass(false_type, cset) ->
-                            Pass(make_union [true_type; false_type], cset)
-                        | x -> x
-                    | x -> x
-                | _ ->
                     // constrain if return to true branch in cft
-                    match build_cset expected t_expr cft cset with
-                    | Pass(true_type, cset) -> Pass(true_type, cset)
-                    | x -> x
-        | _ ->
             // constrain test to True|False in t_cft
-            match build_cset Bool test t_cft cset with
-            | Pass(_, cset) ->
                 // constrain test to False in f_cft
-                match build_cset False test f_cft cset with
-                | Pass(_, cset) ->
                     // constrain if return to true branch in t_cft
-                    match build_cset expected t_expr t_cft cset with
-                    | Pass(true_type, cset) -> 
                         // constrain if return to false branch in f_cft
-                        match build_cset expected f_expr f_cft cset with
-                        | Pass(false_type, cset) -> 
-                            Pass(make_union [true_type; false_type], cset)
-                        | x -> x
-                    | x -> x
-                | _ ->
                     // constrain test to True|False in f_cft
-                    match build_cset Bool test f_cft cset with
-                    | Pass(_, cset) ->
                         // constrain if return to true branch in t_cft
-                        match build_cset expected t_expr t_cft cset with
-                        | Pass(true_type, cset) -> 
                             // constrain if return to false branch in f_cft
-                            match build_cset expected f_expr f_cft cset with
-                            | Pass(false_type, cset) -> 
-                                Pass(make_union [true_type; false_type], cset)
-                            | x -> x
-                        | x -> x
-                    | _ ->
                         // constrain if return to true branch in cft
-                        match build_cset expected t_expr cft cset with
-                        | Pass(true_type, cset) -> Pass(true_type, cset)
-                        | x -> x
-            | _ ->
                 // constrain test to False in f_cft
-                match build_cset False test f_cft cset with
-                | Pass(_, cset) ->
                     // constrain if return to false branch in cft
-                    match build_cset expected f_expr cft cset with
-                    | Pass(false_type, cset) -> Pass(false_type, cset)
-                    | x -> x
-                | _ ->
                     // constrain test to True|False in f_cft
-                    match build_cset Bool f_expr f_cft cset with
-                    | Pass(_, cset) ->
                         // constrain if return to false branch in cft
-                        match build_cset expected f_expr cft cset with
-                        | Pass(false_type, cset) -> Pass(false_type, cset)
-                        | x -> x
-                    | x -> x
-
+        
+        failwith "TODO: build_cset.If"
 
 ///Replaces all instances of type variables with their constraints
 let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
@@ -352,85 +209,6 @@ let fold_type_constants (cset : Map<string, Type>) : Map<string, Type> =
 
     let to_fold, lookup = Map.partition contains_vars cset
     folder lookup <| Map.toList to_fold
-
-
-let constrain_undefined_ids (cft : ControlFlowTree) (map : Map<string, Type>) : Map<string, Type> =
-    let rec find_undefined_ids (undef_set, all_ids) = function
-        | Leaf(leaf_map) ->
-            let folder (undef_set, all_map) poly_id type_id =
-                // does the current binding have a definition?
-                if Map.containsKey type_id map then
-                    // keep it in the cft, add it to the all_map
-                    match Map.tryFind poly_id all_map with
-                    | Some(ids) -> undef_set, Map.add poly_id (type_id::ids) all_map
-                    | None -> undef_set, Map.add poly_id [type_id] all_map
-                else
-                    // remove from cft, don't add to all_map
-                    Set.add type_id undef_set, all_map
-            Map.fold folder (undef_set, all_ids) leaf_map
-        | Branch(trees) ->
-            List.fold find_undefined_ids (undef_set, all_ids) trees
-    
-    let undef_set, all_ids = find_undefined_ids (Set.empty, Map.empty) cft
-
-    let rec update_cfts map = function
-        | Leaf(leaf_map) ->
-            let folder map' poly_id type_id =
-                if Set.contains type_id undef_set then
-                    match Map.tryFind poly_id all_ids with
-                    | Some(ids) -> Map.add type_id (Union(Set.ofList <| List.map TypeId ids)) map'
-                    | None      -> map'
-                else
-                    map'
-            Map.fold folder map leaf_map
-        | Branch(trees) ->
-            List.fold update_cfts map trees
-
-    update_cfts map cft
-
-
-let rec collapse_cft (cft : ControlFlowTree) (cmap : Map<string, Type>) (t : Type) : Type =
-    
-    let lookup id map =
-        let id' = Map.find id map
-        match Map.tryFind id' cmap with
-        | Some(t') -> t'
-        | None -> TypeId(id')
-    
-    let rec cft_lookup id = function
-        | Leaf(map) -> lookup id map
-        | Branch(trees) -> make_union <| List.fold (fun a t -> (cft_lookup id t)::a) [] trees
-
-    match t with
-    | PolyType(id) -> cft_lookup id cft
-    | List(t') -> List(collapse_cft cft cmap t')
-    | Not(t') -> Not(collapse_cft cft cmap t')
-    | Union(uset) -> make_union <| Seq.toList (Seq.map (fun t -> collapse_cft cft cmap t) uset)
-
-    | Func(oset) ->
-        let rec overload_func oset' = function
-            | Leaf(_) as cft ->
-                let rec collapse_overloads oset'' = function
-                    | (arg, rtn)::oset''' -> 
-                        let oset = oset_add (collapse_cft cft cmap arg, collapse_cft cft cmap rtn) oset''
-                        collapse_overloads oset oset'''
-                    | [] -> oset''
-                collapse_overloads oset' <| Set.toList oset
-            | Branch(trees) ->
-                List.fold overload_func oset' trees
-        Func(overload_func Set.empty cft)
-    
-    | x -> x
-
-
-let cft2str cft =
-    let i = ref -1
-    let rec cft2str = function
-        | Leaf(map) -> 
-            i := !i + 1;
-            String.concat "\n" <| Seq.map (fun (p_id, t_id) -> sprintf "%s = %s[%d]" t_id p_id !i) (Map.toSeq map)
-        | Branch(trees) -> String.concat "\n\n====================\n\n" <| List.map cft2str trees
-    cft2str cft
 
 
 let type_check expr =
