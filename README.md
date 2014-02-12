@@ -68,27 +68,6 @@ DynamicStatic can resolve the type using an overload:
 
 ### Recursive Types
 
-Typing the Y-Combinator using recursive types:
-
-```scheme
-;; omega :: (R -> 'b)
-;;   where R = (R -> 'b)
-(define omega (lambda (x) (x x)))
-
-;; Y :: (('a -> 'b) -> 'a -> 'b) -> 'a -> 'b
-(define Y 
-  (lambda (f) 
-    (omega (lambda (x) (f (lambda (v) ((x x) v)))))))
-
-;; fact/Y :: Integer -> Integer
-(define fact/Y
-  (Y (lambda (fact)
-       (lambda (n)
-         (if (<= 0 n) 
-             1 
-             (* n (fact (sub1 n))))))))
-```
-
 Flattening a list:
 
 ```scheme
