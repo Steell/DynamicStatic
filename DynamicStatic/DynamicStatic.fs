@@ -1,6 +1,5 @@
 ﻿module DynamicStatic.DS
 
-open DynamicStatic.ControlFlowTree
 open DynamicStatic.Type
 open DynamicStatic.ConstraintSet
 open DynamicStatic.Expression
