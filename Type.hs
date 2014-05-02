@@ -9,7 +9,7 @@ data Type =
     | Bottom --"subclass" of everything
     | Atom
     | Unit
-    | BTrue | BFalse
+    | True | False
     | TypeId String
     | List Type
     | Func OverloadSet
