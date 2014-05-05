@@ -84,7 +84,7 @@ overloadUnifies (subArg, subReturn) (superArg, superReturn) =
 
 unionTypes :: Type -> Type -> Type
 unionTypes (Func os1) (Func os2) = undefined
-unionTypes (Union ts1) t2 =
+unionTypes (Union ts1) t2 = undefined
 
 
 unionTypes t1 t2
