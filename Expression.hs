@@ -2,7 +2,7 @@ module DynamicStatic.Expression () where
 
 
 data Expression =
-    | EAtom
+    | Atom
     | True | False
     | Id String
     | Let String Expression Expression

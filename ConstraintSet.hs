@@ -17,9 +17,11 @@ type IdGen = [String]
 idGen :: IdGen
 idGen = [ 't' : show x | x <- [0..] ]
 
-freshId :: IdGen -> State IdGen String
-freshId = State $ \(id:gen) -> (id, gen)
-
+freshId :: State IdGen String
+freshId = do
+    (id:gen) <- get
+    put gen
+    return id
 
 type Constraint = (String, Type)
 type ConstraintSet = Map String Type
